@@ -65,6 +65,14 @@ const purchaseOrderSchema = new mongoose.Schema(
     },
 
     // =========================
+    // TALLY INTEGRATION
+    // =========================
+    tallyVoucherIdentity: { type: String, trim: true, default: "" },
+    tallyReference: { type: String, trim: true, default: "" },
+    tallyLinkedAutomatically: { type: Boolean, default: false },
+    tallyLastSyncedAt: { type: Date, default: null },
+
+    // =========================
     // FINANCIAL
     // =========================
 

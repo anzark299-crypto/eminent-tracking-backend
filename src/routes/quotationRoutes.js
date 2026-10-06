@@ -1,17 +1,19 @@
 const express = require("express");
 
 const {
-  createPurchaseOrder,
-  getPurchaseOrdersByCustomer,
-  getPurchaseOrdersByDistributor,
-  getAllPurchaseOrders,
-  getPurchaseOrderById,
-  updatePurchaseOrder,
-  deletePurchaseOrder,
-  uploadPurchaseOrderPdf,
-} = require("../controllers/purchaseOrderController");
+  createQuotation,
+  getAllQuotations,
+  getQuotationById,
+  getCustomerQuotations,
+  getDistributorQuotations,
+  updateQuotation,
+  deleteQuotation,
+  getQuotationHistory,
+  uploadQuotationPdf,
+} = require("../controllers/quotationController");
 
 const protect = require("../middleware/authMiddleware");
+
 const uploadPdf = require("../middleware/uploadPdf");
 
 const router = express.Router();
@@ -23,17 +25,18 @@ const router = express.Router();
 router.post(
   "/",
   protect,
-  createPurchaseOrder
+  createQuotation
 );
+
 // =====================================================
-// GET ALL PURCHASE ORDERS
+// GET ALL QUOTATIONS
 // =====================================================
 
 router.get(
   "/",
   protect,
-  getAllPurchaseOrders
-); 
+  getAllQuotations
+);
 
 // =====================================================
 // CUSTOMER
@@ -42,7 +45,7 @@ router.get(
 router.get(
   "/customer/:customerId",
   protect,
-  getPurchaseOrdersByCustomer
+  getCustomerQuotations
 );
 
 // =====================================================
@@ -52,17 +55,27 @@ router.get(
 router.get(
   "/distributor/:distributorId",
   protect,
-  getPurchaseOrdersByDistributor
+  getDistributorQuotations
 );
 
 // =====================================================
-// SINGLE PO
+// QUOTATION HISTORY
+// =====================================================
+
+router.get(
+  "/:id/history",
+  protect,
+  getQuotationHistory
+);
+
+// =====================================================
+// SINGLE QUOTATION
 // =====================================================
 
 router.get(
   "/:id",
   protect,
-  getPurchaseOrderById
+  getQuotationById
 );
 
 // =====================================================
@@ -72,7 +85,7 @@ router.get(
 router.put(
   "/:id",
   protect,
-  updatePurchaseOrder
+  updateQuotation
 );
 
 // =====================================================
@@ -82,7 +95,7 @@ router.put(
 router.delete(
   "/:id",
   protect,
-  deletePurchaseOrder
+  deleteQuotation
 );
 
 // =====================================================
@@ -93,7 +106,7 @@ router.post(
   "/:id/pdf",
   protect,
   uploadPdf.single("pdf"),
-  uploadPurchaseOrderPdf
+  uploadQuotationPdf
 );
 
 module.exports = router;

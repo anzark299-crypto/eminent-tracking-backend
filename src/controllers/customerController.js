@@ -1,4 +1,4 @@
-const Customer = require("../models/customer");
+﻿const Customer = require("../models/customer");
 
 // ------------------------------------
 // CREATE CUSTOMER
@@ -71,7 +71,9 @@ const createCustomer = async (req, res) => {
 // ------------------------------------
 const getCustomers = async (req, res) => {
   try {
-    const customers = await Customer.find().sort({ createdAt: -1 });
+    const customers = await Customer.find({
+      isArchived: { $ne: true },
+    }).sort({ createdAt: -1 });
 
     res.status(200).json({
       customers,
@@ -179,10 +181,14 @@ const deleteCustomer = async (req, res) => {
       });
     }
 
-    await customer.deleteOne();
+    // Soft-delete: preserve the customer _id and all linked history.
+    customer.isArchived = true;
+    customer.archivedAt = new Date();
+
+    await customer.save();
 
     res.status(200).json({
-      message: "Customer deleted successfully",
+      message: "Customer archived successfully",
     });
   } catch (error) {
     console.error("Delete customer error:", error.message);

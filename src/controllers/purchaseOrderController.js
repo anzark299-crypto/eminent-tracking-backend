@@ -199,6 +199,45 @@ const getPurchaseOrdersByDistributor = async (req, res) => {
     });
   }
 };
+// =====================================================
+// GET ALL PURCHASE ORDERS
+// =====================================================
+
+const getAllPurchaseOrders = async (req, res) => {
+  try {
+    const purchaseOrders = await PurchaseOrder.find()
+      .populate("customer", "companyName")
+      .populate("distributor", "companyName")
+      .populate({
+        path: "customerService",
+        populate: {
+          path: "service",
+          select: "name description oem category",
+        },
+      })
+      .populate({
+        path: "distributorService",
+        populate: {
+          path: "service",
+          select: "name description oem category",
+        },
+      })
+      .sort({ poDate: -1 });
+
+    res.status(200).json({
+      purchaseOrders,
+    });
+  } catch (error) {
+    console.error(
+      "Get all purchase orders error:",
+      error.message
+    );
+
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
 
 // =====================================================
 // GET PURCHASE ORDER BY ID
@@ -260,6 +299,12 @@ const updatePurchaseOrder = async (req, res) => {
     if (!purchaseOrder) {
       return res.status(404).json({
         message: "Purchase order not found",
+      });
+    }
+
+    if (purchaseOrder.tallyLinkedAutomatically === true) {
+      return res.status(409).json({
+        message: "Tally-linked purchase orders are read-only. Update them in TallyPrime.",
       });
     }
 
@@ -382,6 +427,12 @@ const deletePurchaseOrder = async (req, res) => {
     if (!purchaseOrder) {
       return res.status(404).json({
         message: "Purchase order not found",
+      });
+    }
+
+    if (purchaseOrder.tallyLinkedAutomatically === true) {
+      return res.status(409).json({
+        message: "Tally-linked purchase orders are read-only. Update them in TallyPrime.",
       });
     }
 
@@ -521,6 +572,7 @@ module.exports = {
   createPurchaseOrder,
   getPurchaseOrdersByCustomer,
   getPurchaseOrdersByDistributor,
+  getAllPurchaseOrders,
   getPurchaseOrderById,
   updatePurchaseOrder,
   deletePurchaseOrder,

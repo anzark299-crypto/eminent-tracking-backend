@@ -1,4 +1,4 @@
-const Distributor = require("../models/distributor");
+﻿const Distributor = require("../models/distributor");
 
 // ==========================
 // CREATE DISTRIBUTOR
@@ -126,7 +126,9 @@ const createDistributor = async (req, res) => {
 
 const getAllDistributors = async (req, res) => {
   try {
-    const distributors = await Distributor.find().sort({
+    const distributors = await Distributor.find({
+      isArchived: { $ne: true },
+    }).sort({
       createdAt: -1,
     });
 
@@ -268,10 +270,14 @@ const deleteDistributor = async (req, res) => {
       });
     }
 
-    await Distributor.findByIdAndDelete(req.params.id);
+    // Soft-delete: preserve the distributor _id and all linked history.
+    distributor.isArchived = true;
+    distributor.archivedAt = new Date();
+
+    await distributor.save();
 
     res.status(200).json({
-      message: "Distributor deleted successfully",
+      message: "Distributor archived successfully",
     });
   } catch (error) {
     console.error(
@@ -292,3 +298,5 @@ module.exports = {
   updateDistributor,
   deleteDistributor,
 };
+
+

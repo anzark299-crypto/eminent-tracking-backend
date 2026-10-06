@@ -71,6 +71,36 @@ const customerServiceSchema = new mongoose.Schema(
       default: 30,
       min: 0,
     },
+
+    // Tally integration identity. A customer-service row created from a
+    // Tally voucher is keyed to the exact voucher + item, so live sync can
+    // update it without creating duplicates.
+    tallyVoucherIdentity: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    tallyVoucherIdentityType: {
+      type: String,
+      default: null,
+    },
+
+    tallyItemName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    tallyLinkedAutomatically: {
+      type: Boolean,
+      default: false,
+    },
+
+    tallyLastSyncedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

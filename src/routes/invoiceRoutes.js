@@ -1,7 +1,9 @@
+
 const express = require("express");
 
 const {
   createInvoice,
+  getAllInvoices,
   getInvoicesByCustomer,
   getInvoicesByDistributor,
   getInvoicesByGroup,
@@ -12,6 +14,7 @@ const {
 } = require("../controllers/invoiceController");
 
 const protect = require("../middleware/authMiddleware");
+
 const uploadPdf = require("../middleware/uploadPdf");
 
 const router = express.Router();
@@ -24,6 +27,20 @@ router.post(
   "/",
   protect,
   createInvoice
+);
+
+// ==========================================================
+// GET ALL INVOICES
+// CENTRAL DASHBOARD
+//
+// IMPORTANT:
+// This route must come BEFORE /:id
+// ==========================================================
+
+router.get(
+  "/",
+  protect,
+  getAllInvoices
 );
 
 // ==========================================================

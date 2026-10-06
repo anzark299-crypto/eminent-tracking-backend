@@ -1,10 +1,11 @@
 require("dotenv").config();
-
+const quotationRoutes = require("./src/routes/quotationRoutes");
 const admin = require("./src/config/firebaseAdmin");
 const cron = require("node-cron");
 const express = require("express");
 const distributorRoutes = require("./src/routes/distributorRoutes");
 const distributorServiceRoutes = require("./src/routes/distributorServiceRoutes");
+const tallyRoutes = require("./src/routes/tallyRoutes");
 // ==========================
 // CONFIG
 // ==========================
@@ -46,9 +47,11 @@ const PORT = process.env.PORT || 4000;
 
 // Parse JSON request bodies
 // IMPORTANT: This MUST come before all routes.
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+app.use("/api/quotations", quotationRoutes);
 
 
+app.use("/api/tally", tallyRoutes);
 app.use(
   "/api/distributor-services",
   distributorServiceRoutes

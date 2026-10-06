@@ -188,6 +188,34 @@ const distributorServiceSchema = new mongoose.Schema(
       trim: true,
       default: null,
     },
+
+    // Tally integration identity.
+    tallyVoucherIdentity: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    tallyVoucherIdentityType: {
+      type: String,
+      default: null,
+    },
+
+    tallyItemName: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+
+    tallyLinkedAutomatically: {
+      type: Boolean,
+      default: false,
+    },
+
+    tallyLastSyncedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

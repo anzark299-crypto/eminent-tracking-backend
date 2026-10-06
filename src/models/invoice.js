@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 
 const invoiceSchema = new mongoose.Schema(
   {
@@ -49,10 +49,10 @@ const invoiceSchema = new mongoose.Schema(
     //
     // Example:
     //
-    // INV-001 → 1/4 → Group A
-    // INV-002 → 2/4 → Group A
-    // INV-003 → 3/4 → Group A
-    // INV-004 → 4/4 → Group A
+    // INV-001 â†’ 1/4 â†’ Group A
+    // INV-002 â†’ 2/4 â†’ Group A
+    // INV-003 â†’ 3/4 â†’ Group A
+    // INV-004 â†’ 4/4 â†’ Group A
     //
     // A one-time invoice can have null here.
     // ==========================================================
@@ -82,6 +82,23 @@ const invoiceSchema = new mongoose.Schema(
     },
 
     // ==========================================================
+    // TALLY INTEGRATION
+    // ==========================================================
+    tallyVoucherIdentity: { type: String, trim: true, default: "" },
+    tallyVoucherIdentityType: {
+      type: String,
+      enum: ["", "GUID", "VCHKEY", "REMOTEID", "VOUCHERKEY", "VOUCHERRETAINKEY", "FALLBACK"],
+      default: "",
+    },
+    tallyGuid: { type: String, trim: true, default: "" },
+    tallyVchKey: { type: String, trim: true, default: "" },
+    tallyVoucherKey: { type: String, trim: true, default: "" },
+    tallyVoucherRetainKey: { type: String, trim: true, default: "" },
+    tallyReference: { type: String, trim: true, default: "" },
+    tallyLinkedAutomatically: { type: Boolean, default: false },
+    tallyLastSyncedAt: { type: Date, default: null },
+
+    // ==========================================================
     // PAYMENT
     // ==========================================================
     status: {
@@ -94,6 +111,57 @@ const invoiceSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+
+    // ==========================================================
+    // PAYMENT STATUS RECONCILIATION
+    // ==========================================================
+
+    paymentStatusSource: {
+      type: String,
+      enum: ["tally", "manual", ""],
+      default: "",
+    },
+
+    manualPaymentStatus: {
+      type: String,
+      enum: ["paid", "unpaid", null],
+      default: null,
+    },
+
+    manualPaymentDate: {
+      type: Date,
+      default: null,
+    },
+
+    manualPaymentUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    // TALLY PAYMENT RECONCILIATION
+    tallyPaymentStatus: {
+      type: String,
+      enum: ["unpaid", "unconfirmed", "partial", "paid"],
+      default: "unpaid",
+    },
+
+    tallyPaymentAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    tallyPaymentUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    tallyPaymentConfirmationType: {
+      type: String,
+      enum: ['', 'automatic', 'manual'],
+      default: '',
+    },
+
 
     // ==========================================================
     // DUE DATE
@@ -152,3 +220,6 @@ const invoiceSchema = new mongoose.Schema(
 const Invoice = mongoose.model("Invoice", invoiceSchema);
 
 module.exports = Invoice;
+
+
+

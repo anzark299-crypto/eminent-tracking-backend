@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 
 const Invoice = require("../models/invoice");
@@ -430,6 +431,56 @@ const createInvoice = async (req, res) => {
 };
 
 // ==========================================================
+// GET ALL INVOICES
+// CENTRAL DASHBOARD
+// ==========================================================
+
+const getAllInvoices = async (req, res) => {
+  try {
+    const invoices = await Invoice.find()
+      .populate("customer", "companyName")
+      .populate("distributor", "companyName")
+      .populate({
+        path: "customerService",
+        populate: {
+          path: "service",
+          select:
+            "name description oem category unit",
+        },
+      })
+      .populate({
+        path: "distributorService",
+        populate: {
+          path: "service",
+          select:
+            "name description oem category unit",
+        },
+      })
+      .populate(
+        "purchaseOrder",
+        "poNumber poDate amount poIssuedTo ourPoNumber ourPoDate"
+      )
+      .sort({
+        invoiceDate: -1,
+        installmentNumber: 1,
+      });
+
+    res.status(200).json({
+      invoices,
+    });
+  } catch (error) {
+    console.error(
+      "Get all invoices error:",
+      error.message
+    );
+
+    res.status(500).json({
+      message: "Server error",
+    });
+  }
+};
+
+// ==========================================================
 // GET CUSTOMER INVOICES
 // ==========================================================
 
@@ -636,6 +687,12 @@ const updateInvoice = async (req, res) => {
     if (!invoice) {
       return res.status(404).json({
         message: "Invoice not found",
+      });
+    }
+
+    if (invoice.tallyLinkedAutomatically === true) {
+      return res.status(409).json({
+        message: "Tally-linked invoices are read-only. Update them in TallyPrime.",
       });
     }
 
@@ -1171,6 +1228,12 @@ const deleteInvoice = async (req, res) => {
       });
     }
 
+    if (invoice.tallyLinkedAutomatically === true) {
+      return res.status(409).json({
+        message: "Tally-linked invoices are read-only. Update them in TallyPrime.",
+      });
+    }
+
     if (invoice.pdfPublicId) {
       try {
         await cloudinary.uploader.destroy(
@@ -1311,6 +1374,7 @@ const uploadInvoicePdf = async (
 
 module.exports = {
   createInvoice,
+  getAllInvoices,
   getInvoicesByCustomer,
   getInvoicesByDistributor,
   getInvoicesByGroup,

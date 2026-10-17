@@ -37,6 +37,27 @@ const sendEmailNotification = async (users, subject, message) => {
   }
 };
 
+const sendPasswordResetEmail = async (email, resetLink) => {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+    throw new Error("Password-reset email configuration is missing");
+  }
+
+  await transporter.sendMail({
+    from: `"Eminent Tracking" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: "Reset your Eminent Tracking password",
+    text: [
+      "We received a request to reset your Eminent Tracking password.",
+      "",
+      "Open this link on your device to choose a new password:",
+      resetLink,
+      "",
+      "This link expires in 15 minutes and can only be used once.",
+      "If you did not request this, you can ignore this email.",
+    ].join("\n"),
+  });
+};
 module.exports = {
+  sendPasswordResetEmail,
   sendEmailNotification,
 };

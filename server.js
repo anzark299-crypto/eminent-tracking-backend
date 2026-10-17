@@ -3,6 +3,7 @@ const quotationRoutes = require("./src/routes/quotationRoutes");
 const admin = require("./src/config/firebaseAdmin");
 const cron = require("node-cron");
 const express = require("express");
+const cors = require("cors");
 const distributorRoutes = require("./src/routes/distributorRoutes");
 const distributorServiceRoutes = require("./src/routes/distributorServiceRoutes");
 const tallyRoutes = require("./src/routes/tallyRoutes");
@@ -47,6 +48,12 @@ const PORT = process.env.PORT || 4000;
 
 // Parse JSON request bodies
 // IMPORTANT: This MUST come before all routes.
+// Allow the hosted password-reset page to call the reset API.
+app.use("/api/auth/reset-password", cors({
+  origin: "https://lucky-meadow-874a.anzark299.workers.dev",
+  methods: ["POST"],
+  allowedHeaders: ["Content-Type"],
+}));
 app.use(express.json({ limit: "10mb" }));
 app.use("/api/quotations", quotationRoutes);
 

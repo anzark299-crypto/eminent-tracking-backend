@@ -1,4 +1,7 @@
+const mongoose = require("mongoose");
 const PurchaseOrder = require("../models/purchaseOrder");
+const CustomerService = require("../models/customerService");
+const DistributorService = require("../models/distributorService");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
 const Activity = require("../models/activity");
@@ -200,6 +203,61 @@ const getPurchaseOrdersByDistributor = async (req, res) => {
   }
 };
 // =====================================================
+// =====================================================
+// GET PURCHASE ORDERS BY CUSTOMER SERVICE ASSIGNMENT
+// =====================================================
+const getPurchaseOrdersByCustomerService = async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+
+    if (!mongoose.isValidObjectId(serviceId)) {
+      return res.status(400).json({ message: "Invalid customer service ID" });
+    }
+
+    const assignment = await CustomerService.findById(serviceId).select("customer");
+    if (!assignment) {
+      return res.status(404).json({ message: "Customer service assignment not found" });
+    }
+
+    const purchaseOrders = await PurchaseOrder.find({
+      customerService: assignment._id,
+      customer: assignment.customer,
+    }).sort({ poDate: -1, createdAt: -1 });
+
+    return res.status(200).json({ purchaseOrders });
+  } catch (error) {
+    console.error("Get customer-service purchase orders error:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// =====================================================
+// GET PURCHASE ORDERS BY DISTRIBUTOR SERVICE ASSIGNMENT
+// =====================================================
+const getPurchaseOrdersByDistributorService = async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+
+    if (!mongoose.isValidObjectId(serviceId)) {
+      return res.status(400).json({ message: "Invalid distributor service ID" });
+    }
+
+    const assignment = await DistributorService.findById(serviceId).select("distributor");
+    if (!assignment) {
+      return res.status(404).json({ message: "Distributor service assignment not found" });
+    }
+
+    const purchaseOrders = await PurchaseOrder.find({
+      distributorService: assignment._id,
+      distributor: assignment.distributor,
+    }).sort({ poDate: -1, createdAt: -1 });
+
+    return res.status(200).json({ purchaseOrders });
+  } catch (error) {
+    console.error("Get distributor-service purchase orders error:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
 // GET ALL PURCHASE ORDERS
 // =====================================================
 
@@ -571,6 +629,8 @@ const uploadPurchaseOrderPdf = async (req, res) => {
 module.exports = {
   createPurchaseOrder,
   getPurchaseOrdersByCustomer,
+  getPurchaseOrdersByCustomerService,
+  getPurchaseOrdersByDistributorService,
   getPurchaseOrdersByDistributor,
   getAllPurchaseOrders,
   getPurchaseOrderById,

@@ -6,6 +6,8 @@ const {
   getQuotationById,
   getCustomerQuotations,
   getDistributorQuotations,
+  getCustomerServiceQuotations,
+  getDistributorServiceQuotations,
   updateQuotation,
   deleteQuotation,
   getQuotationHistory,
@@ -56,6 +58,26 @@ router.get(
   "/distributor/:distributorId",
   protect,
   getDistributorQuotations
+);
+
+// =====================================================
+// CUSTOMER SERVICE QUOTATIONS
+// =====================================================
+
+router.get(
+  "/customer-service/:serviceId",
+  protect,
+  getCustomerServiceQuotations
+);
+
+// =====================================================
+// DISTRIBUTOR SERVICE QUOTATIONS
+// =====================================================
+
+router.get(
+  "/distributor-service/:serviceId",
+  protect,
+  getDistributorServiceQuotations
 );
 
 // =====================================================

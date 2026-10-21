@@ -18,6 +18,20 @@ const quotationSchema = new mongoose.Schema(
       default: null,
     },
 
+    // Optional link to a specific customer service assignment.
+    customerService: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CustomerService",
+      default: null,
+    },
+
+    // Optional link to a specific distributor service assignment.
+    distributorService: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "DistributorService",
+      default: null,
+    },
+
     // ==========================================
     // QUOTATION DETAILS
     // ==========================================

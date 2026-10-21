@@ -564,6 +564,65 @@ const getInvoicesByDistributor = async (req, res) => {
 };
 
 // ==========================================================
+// ==========================================================
+// GET INVOICES BY CUSTOMER SERVICE ASSIGNMENT
+// ==========================================================
+const getInvoicesByCustomerService = async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+
+    if (!mongoose.isValidObjectId(serviceId)) {
+      return res.status(400).json({ message: "Invalid customer service ID" });
+    }
+
+    const assignment = await CustomerService.findById(serviceId).select("customer");
+    if (!assignment) {
+      return res.status(404).json({ message: "Customer service assignment not found" });
+    }
+
+    const invoices = await Invoice.find({
+      customerService: assignment._id,
+      customer: assignment.customer,
+    })
+      .populate("purchaseOrder", "poNumber poDate amount pdfUrl")
+      .sort({ invoiceDate: -1, createdAt: -1 });
+
+    return res.status(200).json({ invoices });
+  } catch (error) {
+    console.error("Get customer-service invoices error:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// ==========================================================
+// GET INVOICES BY DISTRIBUTOR SERVICE ASSIGNMENT
+// ==========================================================
+const getInvoicesByDistributorService = async (req, res) => {
+  try {
+    const { serviceId } = req.params;
+
+    if (!mongoose.isValidObjectId(serviceId)) {
+      return res.status(400).json({ message: "Invalid distributor service ID" });
+    }
+
+    const assignment = await DistributorService.findById(serviceId).select("distributor");
+    if (!assignment) {
+      return res.status(404).json({ message: "Distributor service assignment not found" });
+    }
+
+    const invoices = await Invoice.find({
+      distributorService: assignment._id,
+      distributor: assignment.distributor,
+    })
+      .populate("purchaseOrder", "poNumber poDate amount pdfUrl")
+      .sort({ invoiceDate: -1, createdAt: -1 });
+
+    return res.status(200).json({ invoices });
+  } catch (error) {
+    console.error("Get distributor-service invoices error:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
 // GET INVOICES BY GROUP
 // ==========================================================
 
@@ -1376,6 +1435,8 @@ module.exports = {
   createInvoice,
   getAllInvoices,
   getInvoicesByCustomer,
+  getInvoicesByCustomerService,
+  getInvoicesByDistributorService,
   getInvoicesByDistributor,
   getInvoicesByGroup,
   getInvoiceById,

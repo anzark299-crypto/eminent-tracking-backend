@@ -5,6 +5,8 @@ const {
   createInvoice,
   getAllInvoices,
   getInvoicesByCustomer,
+  getInvoicesByCustomerService,
+  getInvoicesByDistributorService,
   getInvoicesByDistributor,
   getInvoicesByGroup,
   getInvoiceById,
@@ -64,6 +66,20 @@ router.get(
 );
 
 // ==========================================================
+// ==========================================================
+// SERVICE-SPECIFIC INVOICES
+// ==========================================================
+router.get(
+  "/customer-service/:serviceId",
+  protect,
+  getInvoicesByCustomerService
+);
+
+router.get(
+  "/distributor-service/:serviceId",
+  protect,
+  getInvoicesByDistributorService
+);
 // INVOICES BY INSTALLMENT GROUP
 //
 // IMPORTANT:

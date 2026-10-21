@@ -1,4 +1,7 @@
+const mongoose = require('mongoose');
 const Quotation = require("../models/quotation");
+const CustomerService = require("../models/customerService");
+const DistributorService = require("../models/distributorService");
 const QuotationHistory = require("../models/quotationHistory");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
@@ -12,6 +15,8 @@ const createQuotation = async (req, res) => {
     const {
       customer,
       distributor,
+      customerService,
+      distributorService,
       quotationNumber,
       quotationDate,
       providedDate,
@@ -24,6 +29,66 @@ const createQuotation = async (req, res) => {
     // EXACTLY ONE PARTY
     // =====================================================
 
+    if (customerService && !customer) {
+      return res.status(400).json({
+        message: "A customer service quotation requires a customer",
+      });
+    }
+
+    if (distributorService && !distributor) {
+      return res.status(400).json({
+        message: "A distributor service quotation requires a distributor",
+      });
+    }
+
+    if (customerService && distributorService) {
+      return res.status(400).json({
+        message: "A quotation cannot link both service types",
+      });
+    }
+
+    if (customerService && !mongoose.isValidObjectId(customerService)) {
+      return res.status(400).json({
+        message: "Invalid customer service ID",
+      });
+    }
+
+    if (distributorService && !mongoose.isValidObjectId(distributorService)) {
+      return res.status(400).json({
+        message: "Invalid distributor service ID",
+      });
+    }
+    if (customerService) {
+      const assignment = await CustomerService.findById(customerService).select("customer");
+
+      if (!assignment) {
+        return res.status(404).json({
+          message: "Customer service assignment not found",
+        });
+      }
+
+      if (String(assignment.customer) !== String(customer)) {
+        return res.status(400).json({
+          message: "Customer service does not belong to this customer",
+        });
+      }
+    }
+
+    if (distributorService) {
+      const assignment = await DistributorService.findById(distributorService).select("distributor");
+
+      if (!assignment) {
+        return res.status(404).json({
+          message: "Distributor service assignment not found",
+        });
+      }
+
+      if (String(assignment.distributor) !== String(distributor)) {
+        return res.status(400).json({
+          message: "Distributor service does not belong to this distributor",
+        });
+      }
+    }
     if (!customer && !distributor) {
       return res.status(400).json({
         message: "Customer or distributor is required",
@@ -66,6 +131,8 @@ const createQuotation = async (req, res) => {
     const quotation = await Quotation.create({
       customer: customer || null,
       distributor: distributor || null,
+      customerService: customerService || null,
+      distributorService: distributorService || null,
 
       quotationNumber,
       quotationDate,
@@ -108,7 +175,15 @@ const createQuotation = async (req, res) => {
       .populate(
         "distributor",
         "companyName contactPerson email phone address city state pincode gstin"
-      );
+      )
+      .populate({
+        path: "customerService",
+        populate: { path: "service", select: "name" },
+      })
+      .populate({
+        path: "distributorService",
+        populate: { path: "service", select: "name" },
+      });
 
     res.status(201).json({
       message: "Quotation created successfully",
@@ -225,6 +300,61 @@ const getDistributorQuotations = async (req, res) => {
 };
 
 // =====================================================
+// GET CUSTOMER SERVICE QUOTATIONS
+// =====================================================
+
+const getCustomerServiceQuotations = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.serviceId)) {
+      return res.status(400).json({ message: "Invalid customer service ID" });
+    }
+
+    const assignment = await CustomerService.findById(req.params.serviceId).select("customer");
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Customer service assignment not found" });
+    }
+
+    const quotations = await Quotation.find({
+      customerService: assignment._id,
+      customer: assignment.customer,
+    }).sort({ quotationDate: -1, createdAt: -1 });
+
+    return res.status(200).json({ quotations });
+  } catch (error) {
+    console.error("Get customer service quotations error:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// =====================================================
+// GET DISTRIBUTOR SERVICE QUOTATIONS
+// =====================================================
+
+const getDistributorServiceQuotations = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.serviceId)) {
+      return res.status(400).json({ message: "Invalid distributor service ID" });
+    }
+
+    const assignment = await DistributorService.findById(req.params.serviceId).select("distributor");
+
+    if (!assignment) {
+      return res.status(404).json({ message: "Distributor service assignment not found" });
+    }
+
+    const quotations = await Quotation.find({
+      distributorService: assignment._id,
+      distributor: assignment.distributor,
+    }).sort({ quotationDate: -1, createdAt: -1 });
+
+    return res.status(200).json({ quotations });
+  } catch (error) {
+    console.error("Get distributor service quotations error:", error.message);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+// =====================================================
 // GET QUOTATION BY ID
 // =====================================================
 
@@ -240,7 +370,15 @@ const getQuotationById = async (req, res) => {
       .populate(
         "distributor",
         "companyName contactPerson email phone address city state pincode gstin"
-      );
+      )
+      .populate({
+        path: "customerService",
+        populate: { path: "service", select: "name" },
+      })
+      .populate({
+        path: "distributorService",
+        populate: { path: "service", select: "name" },
+      });
 
     if (!quotation) {
       return res.status(404).json({
@@ -328,8 +466,58 @@ const updateQuotation = async (req, res) => {
       amount,
       notes,
       status,
+      customerService,
+      distributorService,
     } = req.body;
 
+    const hasCustomerService = Object.prototype.hasOwnProperty.call(req.body, "customerService");
+    const hasDistributorService = Object.prototype.hasOwnProperty.call(req.body, "distributorService");
+
+    if (hasCustomerService && hasDistributorService && customerService && distributorService) {
+      return res.status(400).json({ message: "A quotation cannot link to both service types." });
+    }
+
+    if (hasCustomerService) {
+      if (customerService) {
+        if (!quotation.customer || quotation.distributor) {
+          return res.status(400).json({ message: "Customer service requires a customer quotation." });
+        }
+        if (!mongoose.isValidObjectId(customerService)) {
+          return res.status(400).json({ message: "Invalid customer service ID." });
+        }
+        const assignment = await CustomerService.findById(customerService).select("customer");
+        if (!assignment) {
+          return res.status(404).json({ message: "Customer service assignment not found." });
+        }
+        if (String(assignment.customer) !== String(quotation.customer)) {
+          return res.status(400).json({ message: "Customer service does not belong to this quotation's customer." });
+        }
+        quotation.customerService = assignment._id;
+      } else {
+        quotation.customerService = null;
+      }
+    }
+
+    if (hasDistributorService) {
+      if (distributorService) {
+        if (!quotation.distributor || quotation.customer) {
+          return res.status(400).json({ message: "Distributor service requires a distributor quotation." });
+        }
+        if (!mongoose.isValidObjectId(distributorService)) {
+          return res.status(400).json({ message: "Invalid distributor service ID." });
+        }
+        const assignment = await DistributorService.findById(distributorService).select("distributor");
+        if (!assignment) {
+          return res.status(404).json({ message: "Distributor service assignment not found." });
+        }
+        if (String(assignment.distributor) !== String(quotation.distributor)) {
+          return res.status(400).json({ message: "Distributor service does not belong to this quotation's distributor." });
+        }
+        quotation.distributorService = assignment._id;
+      } else {
+        quotation.distributorService = null;
+      }
+    }
     const previousStatus = quotation.status;
 
     // =====================================================
@@ -430,7 +618,15 @@ const updateQuotation = async (req, res) => {
         .populate(
           "distributor",
           "companyName contactPerson email phone address city state pincode gstin"
-        );
+        )
+        .populate({
+          path: "customerService",
+          populate: { path: "service", select: "name" },
+        })
+        .populate({
+          path: "distributorService",
+          populate: { path: "service", select: "name" },
+        });
 
     res.status(200).json({
       message: "Quotation updated successfully",
@@ -690,6 +886,8 @@ module.exports = {
   getAllQuotations,
   getCustomerQuotations,
   getDistributorQuotations,
+  getCustomerServiceQuotations,
+  getDistributorServiceQuotations,
   getQuotationById,
   getQuotationHistory,
   updateQuotation,

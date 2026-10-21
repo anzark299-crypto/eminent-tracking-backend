@@ -3,6 +3,8 @@ const express = require("express");
 const {
   createPurchaseOrder,
   getPurchaseOrdersByCustomer,
+  getPurchaseOrdersByCustomerService,
+  getPurchaseOrdersByDistributorService,
   getPurchaseOrdersByDistributor,
   getAllPurchaseOrders,
   getPurchaseOrderById,
@@ -56,6 +58,20 @@ router.get(
 );
 
 // =====================================================
+// =====================================================
+// SERVICE-SPECIFIC PURCHASE ORDERS
+// =====================================================
+router.get(
+  "/customer-service/:serviceId",
+  protect,
+  getPurchaseOrdersByCustomerService
+);
+
+router.get(
+  "/distributor-service/:serviceId",
+  protect,
+  getPurchaseOrdersByDistributorService
+);
 // SINGLE PO
 // =====================================================
 

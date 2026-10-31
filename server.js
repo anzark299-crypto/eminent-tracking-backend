@@ -22,6 +22,7 @@ const authRoutes = require("./src/routes/authRoutes");
 const customerRoutes = require("./src/routes/customerRoutes");
 const serviceRoutes = require("./src/routes/serviceRoutes");
 const customerServiceRoutes = require("./src/routes/customerServiceRoutes");
+const serviceCycleRoutes = require("./src/routes/serviceCycleRoutes");
 const purchaseOrderRoutes = require("./src/routes/purchaseOrderRoutes");
 const invoiceRoutes = require("./src/routes/invoiceRoutes");
 const activityRoutes = require("./src/routes/activityRoutes");
@@ -87,6 +88,7 @@ app.use("/api/services", serviceRoutes);
 
 // Customer Services
 app.use("/api/customer-services", customerServiceRoutes);
+app.use("/api/service-cycles", serviceCycleRoutes);
 
 
 app.use("/api/activities", activityRoutes);
@@ -139,3 +141,4 @@ const startServer = async () => {
 };
 
 startServer();
+

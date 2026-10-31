@@ -18,6 +18,13 @@ const purchaseOrderSchema = new mongoose.Schema(
       default: null,
     },
 
+    serviceCycle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceCycle",
+      default: null,
+      index: true,
+    },
+
     // =========================
     // DISTRIBUTOR
     // =========================
@@ -37,6 +44,13 @@ const purchaseOrderSchema = new mongoose.Schema(
     // =========================
     // PO INFORMATION
     // =========================
+
+    quotation: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Quotation",
+      default: null,
+      index: true,
+    },
 
     poNumber: {
       type: String,

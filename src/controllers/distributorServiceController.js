@@ -1,5 +1,7 @@
 const DistributorService = require("../models/distributorService");
 const Distributor = require("../models/distributor");
+const Customer = require("../models/customer");
+const CustomerService = require("../models/customerService");
 const Service = require("../models/service");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
@@ -195,6 +197,7 @@ const createDistributorService = async (
   try {
     const {
       distributor,
+      linkedCustomer,
       service,
       quantity,
       purchasePrice,
@@ -457,6 +460,14 @@ const createDistributorService = async (
     }
 
     // ========================================================
+    if (linkedCustomer) {
+      const customerExists = await Customer.findById(linkedCustomer);
+      if (!customerExists) {
+        return res.status(404).json({
+          message: "Linked customer not found",
+        });
+      }
+    }
     // CHECK SERVICE
     // ========================================================
 
@@ -504,6 +515,7 @@ const createDistributorService = async (
     const distributorService =
       await DistributorService.create({
         distributor,
+        linkedCustomer: linkedCustomer || null,
         service,
 
         quantity,
@@ -553,11 +565,49 @@ const createDistributorService = async (
           notes || null,
       });
 
+    // Safely synchronize the customer-side relationship after creation.
+    try {
+      const getRelationshipId = (value) =>
+        value && typeof value === "object" && value._id
+          ? value._id.toString()
+          : value
+            ? value.toString()
+            : null;
+
+      const createdDistributorId = getRelationshipId(distributorService.distributor);
+      const createdCustomerId = getRelationshipId(distributorService.linkedCustomer);
+      const createdServiceId = getRelationshipId(distributorService.service);
+
+      if (createdDistributorId && createdCustomerId && createdServiceId) {
+        const matches = await CustomerService.find({
+          customer: createdCustomerId,
+          service: createdServiceId,
+        });
+
+        if (matches.length === 1) {
+          const customerService = matches[0];
+          const linkedDistributorId = getRelationshipId(customerService.linkedDistributor);
+
+          if (!linkedDistributorId || linkedDistributorId === createdDistributorId) {
+            customerService.linkedDistributor = createdDistributorId;
+            await customerService.save();
+          } else {
+            console.log("Customer-service reverse sync skipped: already linked to another distributor.");
+          }
+        } else {
+          console.log("Customer-service reverse sync skipped: no unique matching customer service.");
+        }
+      }
+    } catch (syncError) {
+      console.error("Customer-service reverse sync warning:", syncError.message);
+    }
+
     // ========================================================
     // POPULATE
     // ========================================================
 
-   await distributorService.populate("distributor");
+   await distributorService.populate("distributor")
+          .populate("linkedCustomer");
 
 await distributorService.populate("service");
 
@@ -614,6 +664,7 @@ const getDistributorServices = async (
           req.params.distributorId,
       })
         .populate("service")
+        .populate("linkedCustomer")
         .populate(
           "distributor",
           "companyName contactPerson"
@@ -674,7 +725,8 @@ const getDistributorServiceById =
           req.params.id
         )
           .populate("service")
-          .populate("distributor");
+          .populate("distributor")
+          .populate("linkedCustomer");
 
       if (!distributorService) {
         return res.status(404).json({
@@ -737,8 +789,20 @@ const updateDistributorService =
         });
       }
 
+      const getRelationshipId = (value) =>
+        value && typeof value === "object" && value._id
+          ? value._id.toString()
+          : value
+            ? value.toString()
+            : null;
+
+      const previousDistributorId = getRelationshipId(distributorService.distributor);
+      const previousCustomerId = getRelationshipId(distributorService.linkedCustomer);
+      const previousServiceId = getRelationshipId(distributorService.service);
+
       const {
         distributor,
+        linkedCustomer,
         service,
         quantity,
         purchasePrice,
@@ -809,6 +873,22 @@ const updateDistributorService =
 
         distributorService.distributor =
           distributor;
+      }
+
+      // ======================================================
+      // OPTIONAL LINKED CUSTOMER
+      // ======================================================
+
+      if (linkedCustomer !== undefined) {
+        if (linkedCustomer === null || linkedCustomer === "") {
+          distributorService.linkedCustomer = null;
+        } else {
+          const customerExists = await Customer.findById(linkedCustomer);
+          if (!customerExists) {
+            return res.status(404).json({ message: "Linked customer not found" });
+          }
+          distributorService.linkedCustomer = linkedCustomer;
+        }
       }
 
       // ======================================================
@@ -1162,6 +1242,77 @@ const updateDistributorService =
 
       await distributorService.save();
 
+      // Keep the customer-side relationship synchronized safely.
+      try {
+        const currentDistributorId = getRelationshipId(
+          distributorService.distributor
+        );
+        const currentCustomerId = getRelationshipId(
+          distributorService.linkedCustomer
+        );
+        const currentServiceId = getRelationshipId(
+          distributorService.service
+        );
+
+        const relationshipChanged =
+          previousDistributorId !== currentDistributorId ||
+          previousCustomerId !== currentCustomerId ||
+          previousServiceId !== currentServiceId;
+
+        if (
+          relationshipChanged &&
+          previousCustomerId &&
+          previousServiceId
+        ) {
+          const oldMatches = await CustomerService.find({
+            customer: previousCustomerId,
+            service: previousServiceId,
+          });
+
+          if (oldMatches.length === 1) {
+            const oldMatch = oldMatches[0];
+            const oldLinkedDistributor = getRelationshipId(
+              oldMatch.linkedDistributor
+            );
+
+            if (oldLinkedDistributor === previousDistributorId) {
+              oldMatch.linkedDistributor = null;
+              await oldMatch.save();
+            }
+          }
+        }
+
+        if (
+          currentDistributorId &&
+          currentCustomerId &&
+          currentServiceId
+        ) {
+          const currentMatches = await CustomerService.find({
+            customer: currentCustomerId,
+            service: currentServiceId,
+          });
+
+          if (currentMatches.length === 1) {
+            const currentMatch = currentMatches[0];
+            const linkedDistributorId = getRelationshipId(
+              currentMatch.linkedDistributor
+            );
+
+            if (
+              !linkedDistributorId ||
+              linkedDistributorId === currentDistributorId
+            ) {
+              currentMatch.linkedDistributor = currentDistributorId;
+              await currentMatch.save();
+            }
+          }
+        }
+      } catch (syncError) {
+        console.error(
+          "Customer-service relationship sync warning:",
+          syncError.message
+        );
+      }
       await distributorService.populate(
         "service"
       );
@@ -1169,6 +1320,7 @@ const updateDistributorService =
       await distributorService.populate(
         "distributor"
       );
+      await distributorService.populate("linkedCustomer");
 // ======================================================
 // CREATE UPDATE ACTIVITY
 // ======================================================

@@ -1,7 +1,14 @@
-const express = require("express");
+﻿const express = require("express");
 
 const router = express.Router();
 
+
+const protect = require("../middleware/authMiddleware");
+const {
+  listPending,
+  approveParty,
+  declineParty,
+} = require("../controllers/tallyPartyApprovalController");
 // ============================================================
 // TALLY CONTROLLERS
 // ============================================================
@@ -141,4 +148,11 @@ router.get(
 // EXPORT
 // ============================================================
 
+
+// Tally party approval endpoints
+router.get("/party-approvals/pending", protect, listPending);
+router.post("/party-approvals/:id/approve", protect, approveParty);
+router.post("/party-approvals/:id/decline", protect, declineParty);
 module.exports = router;
+
+

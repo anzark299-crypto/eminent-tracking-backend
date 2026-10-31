@@ -9,6 +9,13 @@ const customerServiceSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Optional manually linked distributor
+    linkedDistributor: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Distributor",
+      default: null,
+    },
+
     // Service from our master Service catalog
     service: {
       type: mongoose.Schema.Types.ObjectId,

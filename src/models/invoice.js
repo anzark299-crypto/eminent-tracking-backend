@@ -17,6 +17,13 @@ const invoiceSchema = new mongoose.Schema(
       default: null,
     },
 
+    serviceCycle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceCycle",
+      default: null,
+      index: true,
+    },
+
     // ==========================================================
     // DISTRIBUTOR
     // ==========================================================

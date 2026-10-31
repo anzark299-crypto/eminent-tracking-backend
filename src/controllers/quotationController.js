@@ -1,5 +1,7 @@
 const mongoose = require('mongoose');
 const Quotation = require("../models/quotation");
+const ServiceCycle = require("../models/serviceCycle");
+const ServiceAgreement = require("../models/serviceAgreement");
 const CustomerService = require("../models/customerService");
 const DistributorService = require("../models/distributorService");
 const QuotationHistory = require("../models/quotationHistory");
@@ -17,6 +19,7 @@ const createQuotation = async (req, res) => {
       distributor,
       customerService,
       distributorService,
+      serviceCycle,
       quotationNumber,
       quotationDate,
       providedDate,
@@ -103,6 +106,77 @@ const createQuotation = async (req, res) => {
     }
 
     // =====================================================
+    // SERVICE CYCLE VALIDATION
+    let validatedServiceCycle = null;
+
+    if (serviceCycle) {
+      if (!mongoose.isValidObjectId(serviceCycle)) {
+        return res.status(400).json({ message: "Invalid service cycle ID" });
+      }
+
+      validatedServiceCycle = await ServiceCycle.findById(serviceCycle);
+      if (!validatedServiceCycle) {
+        return res.status(404).json({ message: "Service cycle not found" });
+      }
+
+      const agreement = await ServiceAgreement.findById(
+        validatedServiceCycle.agreement
+      );
+      if (!agreement) {
+        return res.status(404).json({
+          message: "Service agreement for this cycle was not found",
+        });
+      }
+
+      const isCustomerAgreement = Boolean(agreement.customer);
+      const isDistributorAgreement = Boolean(agreement.distributor);
+
+      if (isCustomerAgreement === isDistributorAgreement) {
+        return res.status(400).json({
+          message: "The service agreement must belong to exactly one party",
+        });
+      }
+
+      if (isCustomerAgreement) {
+        if (
+          !customer ||
+          String(customer) !== String(agreement.customer) ||
+          distributor
+        ) {
+          return res.status(400).json({
+            message: "This service cycle does not belong to the selected customer",
+          });
+        }
+
+        if (
+          validatedServiceCycle.customerService &&
+          String(validatedServiceCycle.customerService) !== String(customerService)
+        ) {
+          return res.status(400).json({
+            message: "Select the customer service assignment linked to this cycle",
+          });
+        }
+      } else {
+        if (
+          !distributor ||
+          String(distributor) !== String(agreement.distributor) ||
+          customer
+        ) {
+          return res.status(400).json({
+            message: "This service cycle does not belong to the selected distributor",
+          });
+        }
+
+        if (
+          validatedServiceCycle.distributorService &&
+          String(validatedServiceCycle.distributorService) !== String(distributorService)
+        ) {
+          return res.status(400).json({
+            message: "Select the distributor service assignment linked to this cycle",
+          });
+        }
+      }
+    }
     // BASIC VALIDATION
     // =====================================================
 
@@ -133,6 +207,7 @@ const createQuotation = async (req, res) => {
       distributor: distributor || null,
       customerService: customerService || null,
       distributorService: distributorService || null,
+      serviceCycle: validatedServiceCycle ? validatedServiceCycle._id : null,
 
       quotationNumber,
       quotationDate,
@@ -894,3 +969,4 @@ module.exports = {
   deleteQuotation,
   uploadQuotationPdf,
 };
+

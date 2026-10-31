@@ -5,6 +5,8 @@ const Invoice = require("../models/invoice");
 const DistributorService = require("../models/distributorService");
 const CustomerService = require("../models/customerService");
 const PurchaseOrder = require("../models/purchaseOrder");
+const ServiceCycle = require("../models/serviceCycle");
+const ServiceAgreement = require("../models/serviceAgreement");
 
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
@@ -83,6 +85,11 @@ const createInvoice = async (req, res) => {
       });
     }
 
+    let finalCustomerService = customerService || null;
+    let finalDistributorService = distributorService || null;
+    let linkedPurchaseOrder = null;
+    let inheritedServiceCycle = null;
+
     // CUSTOMER SERVICE
     if (customer && customerService) {
       const customerServiceExists =
@@ -138,6 +145,7 @@ const createInvoice = async (req, res) => {
         });
       }
 
+      linkedPurchaseOrder = purchaseOrderExists;
       if (customer) {
         if (
           !purchaseOrderExists.customer ||
@@ -165,8 +173,180 @@ const createInvoice = async (req, res) => {
       }
     }
 
+    if (linkedPurchaseOrder) {
+      if (customer) {
+        if (
+          linkedPurchaseOrder.customerService &&
+          customerService &&
+          linkedPurchaseOrder.customerService.toString() !== customerService.toString()
+        ) {
+          return res.status(400).json({
+            message: "Purchase order belongs to a different customer service",
+          });
+        }
+        if (!finalCustomerService && linkedPurchaseOrder.customerService) {
+          finalCustomerService = linkedPurchaseOrder.customerService;
+        }
+      }
+
+      if (distributor) {
+        if (
+          linkedPurchaseOrder.distributorService &&
+          distributorService &&
+          linkedPurchaseOrder.distributorService.toString() !== distributorService.toString()
+        ) {
+          return res.status(400).json({
+            message: "Purchase order belongs to a different distributor service",
+          });
+        }
+        if (!finalDistributorService && linkedPurchaseOrder.distributorService) {
+          finalDistributorService = linkedPurchaseOrder.distributorService;
+        }
+      }
+
+      inheritedServiceCycle = linkedPurchaseOrder.serviceCycle || null;
+    }
+
+    // VALIDATE INHERITED SERVICE ASSIGNMENT AND CYCLE
+    if (finalCustomerService) {
+      if (!customer || distributor) {
+        return res.status(400).json({
+          message: "Customer service cannot be assigned to a distributor invoice",
+        });
+      }
+
+      if (!mongoose.isValidObjectId(String(finalCustomerService))) {
+        return res.status(400).json({
+          message: "Invalid customer service ID",
+        });
+      }
+
+      const inheritedCustomerService =
+        await CustomerService.findById(finalCustomerService);
+
+      if (!inheritedCustomerService) {
+        return res.status(404).json({
+          message: "Inherited customer service not found",
+        });
+      }
+
+      if (String(inheritedCustomerService.customer) !== String(customer)) {
+        return res.status(400).json({
+          message: "Inherited customer service belongs to a different customer",
+        });
+      }
+    }
+
+    if (finalDistributorService) {
+      if (!distributor || customer) {
+        return res.status(400).json({
+          message: "Distributor service cannot be assigned to a customer invoice",
+        });
+      }
+
+      if (!mongoose.isValidObjectId(String(finalDistributorService))) {
+        return res.status(400).json({
+          message: "Invalid distributor service ID",
+        });
+      }
+
+      const inheritedDistributorService =
+        await DistributorService.findById(finalDistributorService);
+
+      if (!inheritedDistributorService) {
+        return res.status(404).json({
+          message: "Inherited distributor service not found",
+        });
+      }
+
+      if (
+        String(inheritedDistributorService.distributor) !== String(distributor)
+      ) {
+        return res.status(400).json({
+          message: "Inherited distributor service belongs to a different distributor",
+        });
+      }
+    }
+
+    if (inheritedServiceCycle) {
+      const cycleId = String(inheritedServiceCycle);
+
+      if (!mongoose.isValidObjectId(cycleId)) {
+        return res.status(400).json({
+          message: "Invalid inherited service cycle ID",
+        });
+      }
+
+      const validatedCycle = await ServiceCycle.findById(cycleId);
+
+      if (!validatedCycle) {
+        return res.status(404).json({
+          message: "Inherited service cycle not found",
+        });
+      }
+
+      const agreement = await ServiceAgreement.findById(
+        validatedCycle.agreement
+      );
+
+      if (!agreement) {
+        return res.status(404).json({
+          message: "Inherited service agreement not found",
+        });
+      }
+
+      const isCustomerAgreement = Boolean(agreement.customer);
+      const isDistributorAgreement = Boolean(agreement.distributor);
+
+      if (isCustomerAgreement === isDistributorAgreement) {
+        return res.status(400).json({
+          message: "Service agreement must belong to exactly one customer or distributor",
+        });
+      }
+
+      if (customer) {
+        if (
+          !isCustomerAgreement ||
+          String(agreement.customer) !== String(customer)
+        ) {
+          return res.status(400).json({
+            message: "Inherited service cycle does not belong to this customer",
+          });
+        }
+
+        if (
+          validatedCycle.distributorService ||
+          (validatedCycle.customerService &&
+            String(validatedCycle.customerService) !== String(finalCustomerService || ""))
+        ) {
+          return res.status(400).json({
+            message: "Service assignment does not match the inherited customer cycle",
+          });
+        }
+      } else {
+        if (
+          !isDistributorAgreement ||
+          String(agreement.distributor) !== String(distributor)
+        ) {
+          return res.status(400).json({
+            message: "Inherited service cycle does not belong to this distributor",
+          });
+        }
+
+        if (
+          validatedCycle.customerService ||
+          (validatedCycle.distributorService &&
+            String(validatedCycle.distributorService) !== String(finalDistributorService || ""))
+        ) {
+          return res.status(400).json({
+            message: "Service assignment does not match the inherited distributor cycle",
+          });
+        }
+      }
+    }
     // STATUS
     const finalStatus = status || "unpaid";
+
 
     if (
       !["unpaid", "paid", "cancelled"].includes(
@@ -326,12 +506,13 @@ const createInvoice = async (req, res) => {
     // CREATE
     const invoice = await Invoice.create({
       customer: customer || null,
-      customerService: customerService || null,
+      customerService: finalCustomerService,
 
       distributor: distributor || null,
-      distributorService: distributorService || null,
+      distributorService: finalDistributorService,
 
       purchaseOrder: purchaseOrder || null,
+      serviceCycle: inheritedServiceCycle,
 
       invoiceGroupId: finalInvoiceGroupId,
 
@@ -784,85 +965,55 @@ const updateInvoice = async (req, res) => {
 
     const oldAmount = invoice.amount;
 
-    // CUSTOMER SERVICE
-    if (invoice.customer) {
-      if (customerService !== undefined) {
-        if (customerService === null) {
-          invoice.customerService = null;
-        } else {
-          const serviceExists =
-            await CustomerService.findById(
-              customerService
-            );
+    // PURCHASE ORDER + SERVICE RELATIONSHIP SYNCHRONIZATION
+    let nextCustomerService = invoice.customerService || null;
+    let nextDistributorService = invoice.distributorService || null;
+    let nextServiceCycle = invoice.serviceCycle || null;
+    let nextPurchaseOrder = invoice.purchaseOrder || null;
+    let linkedPurchaseOrder = null;
+    let previousPurchaseOrder = null;
 
-          if (!serviceExists) {
-            return res.status(404).json({
-              message:
-                "Customer service not found",
-            });
-          }
+    const previousPurchaseOrderId = invoice.purchaseOrder
+      ? String(invoice.purchaseOrder)
+      : null;
 
-          if (
-            serviceExists.customer.toString() !==
-            invoice.customer.toString()
-          ) {
-            return res.status(400).json({
-              message:
-                "Customer service does not belong to this customer",
-            });
-          }
+    const sameId = (a, b) =>
+      Boolean(a && b && String(a) === String(b));
 
-          invoice.customerService =
-            customerService;
-        }
-      }
-    }
-
-    // DISTRIBUTOR SERVICE
-    if (invoice.distributor) {
-      if (distributorService !== undefined) {
-        if (distributorService === null) {
-          invoice.distributorService = null;
-        } else {
-          const serviceExists =
-            await DistributorService.findById(
-              distributorService
-            );
-
-          if (!serviceExists) {
-            return res.status(404).json({
-              message:
-                "Distributor service not found",
-            });
-          }
-
-          if (
-            serviceExists.distributor.toString() !==
-            invoice.distributor.toString()
-          ) {
-            return res.status(400).json({
-              message:
-                "Distributor service does not belong to this distributor",
-            });
-          }
-
-          invoice.distributorService =
-            distributorService;
-        }
-      }
-    }
-
-    // PURCHASE ORDER
     if (purchaseOrder !== undefined) {
-      if (purchaseOrder === null) {
-        invoice.purchaseOrder = null;
-      } else {
-        const purchaseOrderExists =
-          await PurchaseOrder.findById(
-            purchaseOrder
-          );
+      if (purchaseOrder === null || purchaseOrder === "") {
+        if (invoice.purchaseOrder) {
+          previousPurchaseOrder =
+            await PurchaseOrder.findById(invoice.purchaseOrder);
+        }
 
-        if (!purchaseOrderExists) {
+        if (
+          previousPurchaseOrder &&
+          sameId(nextCustomerService, previousPurchaseOrder.customerService)
+        ) {
+          nextCustomerService = null;
+        }
+
+        if (
+          previousPurchaseOrder &&
+          sameId(nextDistributorService, previousPurchaseOrder.distributorService)
+        ) {
+          nextDistributorService = null;
+        }
+
+        nextPurchaseOrder = null;
+        nextServiceCycle = null;
+      } else {
+        if (!mongoose.isValidObjectId(String(purchaseOrder))) {
+          return res.status(400).json({
+            message: "Invalid purchase order ID",
+          });
+        }
+
+        linkedPurchaseOrder =
+          await PurchaseOrder.findById(purchaseOrder);
+
+        if (!linkedPurchaseOrder) {
           return res.status(404).json({
             message: "Purchase order not found",
           });
@@ -870,35 +1021,261 @@ const updateInvoice = async (req, res) => {
 
         if (invoice.customer) {
           if (
-            !purchaseOrderExists.customer ||
-            purchaseOrderExists.customer.toString() !==
-              invoice.customer.toString()
+            !linkedPurchaseOrder.customer ||
+            String(linkedPurchaseOrder.customer) !== String(invoice.customer)
           ) {
             return res.status(400).json({
-              message:
-                "Purchase order does not belong to this customer",
+              message: "Purchase order does not belong to this customer",
             });
           }
         }
 
         if (invoice.distributor) {
           if (
-            !purchaseOrderExists.distributor ||
-            purchaseOrderExists.distributor.toString() !==
-              invoice.distributor.toString()
+            !linkedPurchaseOrder.distributor ||
+            String(linkedPurchaseOrder.distributor) !== String(invoice.distributor)
           ) {
             return res.status(400).json({
-              message:
-                "Purchase order does not belong to this distributor",
+              message: "Purchase order does not belong to this distributor",
             });
           }
         }
 
-        invoice.purchaseOrder =
-          purchaseOrder;
+        const purchaseOrderChanged =
+          previousPurchaseOrderId !== String(linkedPurchaseOrder._id);
+
+        if (purchaseOrderChanged && invoice.purchaseOrder) {
+          previousPurchaseOrder =
+            await PurchaseOrder.findById(invoice.purchaseOrder);
+
+          if (
+            previousPurchaseOrder &&
+            sameId(nextCustomerService, previousPurchaseOrder.customerService)
+          ) {
+            nextCustomerService = null;
+          }
+
+          if (
+            previousPurchaseOrder &&
+            sameId(nextDistributorService, previousPurchaseOrder.distributorService)
+          ) {
+            nextDistributorService = null;
+          }
+        }
+
+        nextPurchaseOrder = linkedPurchaseOrder._id;
+        nextServiceCycle = linkedPurchaseOrder.serviceCycle || null;
+      }
+    } else if (
+      invoice.purchaseOrder &&
+      (customerService !== undefined || distributorService !== undefined)
+    ) {
+      linkedPurchaseOrder =
+        await PurchaseOrder.findById(invoice.purchaseOrder);
+
+      if (!linkedPurchaseOrder) {
+        return res.status(404).json({
+          message: "Linked purchase order not found",
+        });
       }
     }
 
+    // EXPLICIT SERVICE SELECTIONS
+    if (customerService !== undefined) {
+      nextCustomerService =
+        customerService === null || customerService === ""
+          ? null
+          : customerService;
+    }
+
+    if (distributorService !== undefined) {
+      nextDistributorService =
+        distributorService === null || distributorService === ""
+          ? null
+          : distributorService;
+    }
+
+    // INHERIT AND VALIDATE PURCHASE ORDER SERVICE ASSIGNMENTS
+    if (linkedPurchaseOrder) {
+      if (invoice.customer && linkedPurchaseOrder.customerService) {
+        if (
+          nextCustomerService &&
+          !sameId(nextCustomerService, linkedPurchaseOrder.customerService)
+        ) {
+          return res.status(400).json({
+            message: "Purchase order belongs to a different customer service",
+          });
+        }
+
+        nextCustomerService = linkedPurchaseOrder.customerService;
+      }
+
+      if (invoice.distributor && linkedPurchaseOrder.distributorService) {
+        if (
+          nextDistributorService &&
+          !sameId(nextDistributorService, linkedPurchaseOrder.distributorService)
+        ) {
+          return res.status(400).json({
+            message: "Purchase order belongs to a different distributor service",
+          });
+        }
+
+        nextDistributorService = linkedPurchaseOrder.distributorService;
+      }
+    }
+
+    // VALIDATE CUSTOMER SERVICE
+    if (nextCustomerService) {
+      if (!invoice.customer || invoice.distributor) {
+        return res.status(400).json({
+          message: "Customer service cannot be assigned to a distributor invoice",
+        });
+      }
+
+      if (!mongoose.isValidObjectId(String(nextCustomerService))) {
+        return res.status(400).json({
+          message: "Invalid customer service ID",
+        });
+      }
+
+      const validatedCustomerService =
+        await CustomerService.findById(nextCustomerService);
+
+      if (!validatedCustomerService) {
+        return res.status(404).json({
+          message: "Customer service not found",
+        });
+      }
+
+      if (String(validatedCustomerService.customer) !== String(invoice.customer)) {
+        return res.status(400).json({
+          message: "Customer service does not belong to this customer",
+        });
+      }
+    }
+
+    // VALIDATE DISTRIBUTOR SERVICE
+    if (nextDistributorService) {
+      if (!invoice.distributor || invoice.customer) {
+        return res.status(400).json({
+          message: "Distributor service cannot be assigned to a customer invoice",
+        });
+      }
+
+      if (!mongoose.isValidObjectId(String(nextDistributorService))) {
+        return res.status(400).json({
+          message: "Invalid distributor service ID",
+        });
+      }
+
+      const validatedDistributorService =
+        await DistributorService.findById(nextDistributorService);
+
+      if (!validatedDistributorService) {
+        return res.status(404).json({
+          message: "Distributor service not found",
+        });
+      }
+
+      if (
+        String(validatedDistributorService.distributor) !==
+        String(invoice.distributor)
+      ) {
+        return res.status(400).json({
+          message: "Distributor service does not belong to this distributor",
+        });
+      }
+    }
+
+    // VALIDATE SERVICE CYCLE AND AGREEMENT
+    if (nextServiceCycle) {
+      const cycleId = String(nextServiceCycle);
+
+      if (!mongoose.isValidObjectId(cycleId)) {
+        return res.status(400).json({
+          message: "Invalid service cycle ID",
+        });
+      }
+
+      const validatedCycle = await ServiceCycle.findById(cycleId);
+
+      if (!validatedCycle) {
+        return res.status(404).json({
+          message: "Service cycle not found",
+        });
+      }
+
+      const agreement = await ServiceAgreement.findById(
+        validatedCycle.agreement
+      );
+
+      if (!agreement) {
+        return res.status(404).json({
+          message: "Service agreement not found",
+        });
+      }
+
+      const isCustomerAgreement = Boolean(agreement.customer);
+      const isDistributorAgreement = Boolean(agreement.distributor);
+
+      if (isCustomerAgreement === isDistributorAgreement) {
+        return res.status(400).json({
+          message: "Service agreement must belong to exactly one customer or distributor",
+        });
+      }
+
+      if (invoice.customer) {
+        if (
+          !isCustomerAgreement ||
+          String(agreement.customer) !== String(invoice.customer)
+        ) {
+          return res.status(400).json({
+            message: "Service cycle does not belong to this customer",
+          });
+        }
+
+        if (
+          validatedCycle.distributorService ||
+          (
+            validatedCycle.customerService &&
+            String(validatedCycle.customerService) !==
+              String(nextCustomerService || "")
+          )
+        ) {
+          return res.status(400).json({
+            message: "Service assignment does not match the customer cycle",
+          });
+        }
+      } else {
+        if (
+          !isDistributorAgreement ||
+          String(agreement.distributor) !== String(invoice.distributor)
+        ) {
+          return res.status(400).json({
+            message: "Service cycle does not belong to this distributor",
+          });
+        }
+
+        if (
+          validatedCycle.customerService ||
+          (
+            validatedCycle.distributorService &&
+            String(validatedCycle.distributorService) !==
+              String(nextDistributorService || "")
+          )
+        ) {
+          return res.status(400).json({
+            message: "Service assignment does not match the distributor cycle",
+          });
+        }
+      }
+    }
+
+    // APPLY VALIDATED RELATIONSHIPS
+    invoice.customerService = nextCustomerService;
+    invoice.distributorService = nextDistributorService;
+    invoice.purchaseOrder = nextPurchaseOrder;
+    invoice.serviceCycle = nextServiceCycle;
     // INVOICE GROUP
     if (invoiceGroupId !== undefined) {
       if (
@@ -1444,3 +1821,4 @@ module.exports = {
   deleteInvoice,
   uploadInvoicePdf,
 };
+

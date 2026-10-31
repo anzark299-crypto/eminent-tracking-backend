@@ -84,6 +84,13 @@ const distributorServiceSchema = new mongoose.Schema(
       required: true,
     },
 
+    // Optional manually linked customer
+    linkedCustomer: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Customer",
+      default: null,
+    },
+
     service: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Service",

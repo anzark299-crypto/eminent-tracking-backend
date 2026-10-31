@@ -1,6 +1,8 @@
 const CustomerService = require("../models/customerService");
 const Customer = require("../models/customer");
 const Service = require("../models/service");
+const Distributor = require("../models/distributor");
+const DistributorService = require("../models/distributorService");
 const Activity = require("../models/activity");
 
 // ------------------------------------
@@ -19,6 +21,7 @@ const createCustomerService = async (req, res) => {
       reminderDaysBefore,
       paymentStatus,
       paymentDate,
+      linkedDistributor,
     } = req.body;
 
     // Validate required fields
@@ -61,6 +64,14 @@ const createCustomerService = async (req, res) => {
       });
     }
 
+    // Validate optional linked distributor
+    if (linkedDistributor) {
+      const existingDistributor = await Distributor.findById(linkedDistributor);
+      if (!existingDistributor) {
+        return res.status(404).json({ message: "Linked distributor not found" });
+      }
+    }
+
     // Check service exists
     const existingService = await Service.findById(service);
 
@@ -90,6 +101,7 @@ const createCustomerService = async (req, res) => {
     const customerService = await CustomerService.create({
       customer,
       service,
+      linkedDistributor: linkedDistributor || null,
       startDate: start,
       endDate: end,
       amount,
@@ -100,9 +112,47 @@ const createCustomerService = async (req, res) => {
       paymentDate: paymentDate ? new Date(paymentDate) : null,
     });
 
+    // Safely sync the reverse relationship only for a unique match.
+    if (linkedDistributor) {
+      try {
+        const matchingDistributorServices = await DistributorService.find({
+          distributor: linkedDistributor,
+          service,
+        });
+
+        if (matchingDistributorServices.length === 1) {
+          const distributorService = matchingDistributorServices[0];
+          const existingCustomerId =
+            distributorService.linkedCustomer?.toString();
+
+          if (
+            !existingCustomerId ||
+            existingCustomerId === customer.toString()
+          ) {
+            distributorService.linkedCustomer = customer;
+            await distributorService.save();
+          } else {
+            console.log(
+              "Relationship sync skipped: distributor service belongs to another customer."
+            );
+          }
+        } else {
+          console.log(
+            "Relationship sync skipped: no unique distributor service match."
+          );
+        }
+      } catch (syncError) {
+        console.error(
+          "Customer-service reverse relationship sync failed:",
+          syncError.message
+        );
+      }
+    }
+
     // Return populated data
     await customerService.populate("customer");
     await customerService.populate("service");
+    await customerService.populate("linkedDistributor");
 
     // ------------------------------------
     // CREATE ACTIVITY
@@ -139,6 +189,7 @@ const getCustomerServices = async (req, res) => {
     const customerServices = await CustomerService.find()
       .populate("customer")
       .populate("service")
+      .populate("linkedDistributor")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -166,6 +217,7 @@ const getCustomerServicesByCustomer = async (req, res) => {
     })
       .populate("customer")
       .populate("service")
+      .populate("linkedDistributor")
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -192,7 +244,8 @@ const getCustomerServiceById = async (req, res) => {
       req.params.id
     )
       .populate("customer")
-      .populate("service");
+      .populate("service")
+      .populate("linkedDistributor");
 
     if (!customerService) {
       return res.status(404).json({
@@ -230,6 +283,12 @@ const updateCustomerService = async (req, res) => {
       });
     }
 
+    const previousDistributorId = customerService.linkedDistributor
+      ? customerService.linkedDistributor.toString()
+      : null;
+    const previousCustomerId = customerService.customer.toString();
+    const previousServiceId = customerService.service.toString();
+
     const {
       customer,
       service,
@@ -242,6 +301,7 @@ const updateCustomerService = async (req, res) => {
       reminderDaysBefore,
       paymentStatus,
       paymentDate,
+      linkedDistributor,
     } = req.body;
 
     if (customer) {
@@ -266,6 +326,23 @@ const updateCustomerService = async (req, res) => {
       }
 
       customerService.service = service;
+    }
+
+    // Update optional linked distributor when explicitly provided
+    if (linkedDistributor !== undefined) {
+      if (linkedDistributor === null || linkedDistributor === "") {
+        customerService.linkedDistributor = null;
+      } else {
+        const existingDistributor = await Distributor.findById(linkedDistributor);
+
+        if (!existingDistributor) {
+          return res.status(404).json({
+            message: "Linked distributor not found",
+          });
+        }
+
+        customerService.linkedDistributor = linkedDistributor;
+      }
     }
 
     if (startDate) {
@@ -329,8 +406,70 @@ const updateCustomerService = async (req, res) => {
 
     await customerService.save();
 
+    // Clear the old reverse link only if it still belongs to this customer.
+    const currentDistributorId = customerService.linkedDistributor
+      ? customerService.linkedDistributor.toString()
+      : null;
+    const relationshipChanged =
+      previousDistributorId !== currentDistributorId ||
+      previousServiceId !== customerService.service.toString() ||
+      previousCustomerId !== customerService.customer.toString();
+
+    if (relationshipChanged && previousDistributorId) {
+      try {
+        const previousMatches = await DistributorService.find({
+          distributor: previousDistributorId,
+          service: previousServiceId,
+        });
+        if (previousMatches.length === 1) {
+          const previousMatch = previousMatches[0];
+          if (previousMatch.linkedCustomer && previousMatch.linkedCustomer.toString() === previousCustomerId) {
+            previousMatch.linkedCustomer = null;
+            await previousMatch.save();
+          }
+        }
+      } catch (syncError) {
+        console.error("Previous relationship cleanup failed:", syncError.message);
+      }
+    }
+
+    // Safely synchronize the reverse link without changing payment fields.
+    const selectedDistributorId = customerService.linkedDistributor
+      ? customerService.linkedDistributor.toString()
+      : null;
+    const customerId = customerService.customer.toString();
+    const serviceId = customerService.service.toString();
+
+    if (selectedDistributorId) {
+      try {
+        const matches = await DistributorService.find({
+          distributor: selectedDistributorId,
+          service: serviceId,
+        });
+
+        if (matches.length === 1) {
+          const match = matches[0];
+          const existingCustomerId = match.linkedCustomer
+            ? match.linkedCustomer.toString()
+            : null;
+
+          if (!existingCustomerId || existingCustomerId === customerId) {
+            match.linkedCustomer = customerService.customer;
+            await match.save();
+          }
+        } else {
+          console.log(
+            "Relationship sync skipped: no unique distributor service match."
+          );
+        }
+      } catch (syncError) {
+        console.error("Relationship sync failed:", syncError.message);
+      }
+    }
+
     await customerService.populate("customer");
     await customerService.populate("service");
+    await customerService.populate("linkedDistributor");
 
     res.status(200).json({
       message: "Customer service updated successfully",

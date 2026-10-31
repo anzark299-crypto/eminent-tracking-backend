@@ -25,6 +25,13 @@ const quotationSchema = new mongoose.Schema(
       default: null,
     },
 
+    serviceCycle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceCycle",
+      default: null,
+      index: true,
+    },
+
     // Optional link to a specific distributor service assignment.
     distributorService: {
       type: mongoose.Schema.Types.ObjectId,

@@ -1,5 +1,9 @@
 const mongoose = require("mongoose");
 const PurchaseOrder = require("../models/purchaseOrder");
+const Quotation = require("../models/quotation");
+const Invoice = require("../models/invoice");
+const ServiceCycle = require("../models/serviceCycle");
+const ServiceAgreement = require("../models/serviceAgreement");
 const CustomerService = require("../models/customerService");
 const DistributorService = require("../models/distributorService");
 const cloudinary = require("../config/cloudinary");
@@ -12,11 +16,13 @@ const Activity = require("../models/activity");
 
 const createPurchaseOrder = async (req, res) => {
   try {
-    const {
+    let {
       customer,
       customerService,
       distributor,
       distributorService,
+      serviceCycle,
+      quotation,
       poNumber,
       poDate,
       poIssuedTo,
@@ -53,6 +59,274 @@ const createPurchaseOrder = async (req, res) => {
       });
     }
 
+    // VALIDATE SERVICE ASSIGNMENT OWNERSHIP
+    if (customerService) {
+      if (!mongoose.isValidObjectId(customerService)) {
+        return res.status(400).json({ message: "Invalid customer service ID" });
+      }
+      const assignment = await CustomerService.findById(customerService).select("customer");
+      if (!assignment) {
+        return res.status(404).json({ message: "Customer service assignment not found" });
+      }
+      if (!customer || String(assignment.customer) !== String(customer)) {
+        return res.status(400).json({ message: "Customer service does not belong to this customer" });
+      }
+    }
+
+    if (distributorService) {
+      if (!mongoose.isValidObjectId(distributorService)) {
+        return res.status(400).json({ message: "Invalid distributor service ID" });
+      }
+      const assignment = await DistributorService.findById(distributorService).select("distributor");
+      if (!assignment) {
+        return res.status(404).json({ message: "Distributor service assignment not found" });
+      }
+      if (!distributor || String(assignment.distributor) !== String(distributor)) {
+        return res.status(400).json({ message: "Distributor service does not belong to this distributor" });
+      }
+    }
+
+    // VALIDATE QUOTATION OWNERSHIP
+    let validatedQuotation = null;
+
+    if (quotation) {
+      if (!mongoose.isValidObjectId(quotation)) {
+        return res.status(400).json({ message: "Invalid quotation ID" });
+      }
+
+      validatedQuotation = await Quotation.findById(quotation);
+
+      if (!validatedQuotation) {
+        return res.status(404).json({ message: "Quotation not found" });
+      }
+
+      if (
+        String(validatedQuotation.customer || "") !== String(customer || "") ||
+        String(validatedQuotation.distributor || "") !== String(distributor || "")
+      ) {
+        return res.status(400).json({
+          message: "Quotation does not belong to the selected party",
+        });
+      }
+    }
+
+    // RESOLVE THE SERVICE CYCLE: explicit cycle first, otherwise quotation cycle.
+    let validatedServiceCycle = null;
+    let validatedAgreement = null;
+    const quotationCycleId = validatedQuotation?.serviceCycle
+      ? String(validatedQuotation.serviceCycle)
+      : null;
+    const requestedCycleId = serviceCycle ? String(serviceCycle) : null;
+
+    if (
+      requestedCycleId &&
+      quotationCycleId &&
+      requestedCycleId !== quotationCycleId
+    ) {
+      return res.status(400).json({
+        message: "Quotation belongs to a different service cycle",
+      });
+    }
+
+    const effectiveCycleId = requestedCycleId || quotationCycleId;
+
+    if (effectiveCycleId) {
+      if (!mongoose.isValidObjectId(effectiveCycleId)) {
+        return res.status(400).json({ message: "Invalid service cycle ID" });
+      }
+
+      validatedServiceCycle = await ServiceCycle.findById(effectiveCycleId);
+
+      if (!validatedServiceCycle) {
+        return res.status(404).json({ message: "Service cycle not found" });
+      }
+
+      validatedAgreement = await ServiceAgreement.findById(
+        validatedServiceCycle.agreement
+      );
+
+      if (!validatedAgreement) {
+        return res.status(404).json({ message: "Service agreement not found" });
+      }
+
+      const isCustomerAgreement = Boolean(validatedAgreement.customer);
+      const isDistributorAgreement = Boolean(validatedAgreement.distributor);
+
+      if (isCustomerAgreement === isDistributorAgreement) {
+        return res.status(400).json({
+          message: "Service agreement must belong to exactly one party",
+        });
+      }
+
+      if (isCustomerAgreement) {
+        if (
+          !customer ||
+          String(customer) !== String(validatedAgreement.customer) ||
+          distributor
+        ) {
+          return res.status(400).json({
+            message: "Service cycle does not belong to this customer",
+          });
+        }
+      } else {
+        if (
+          !distributor ||
+          String(distributor) !== String(validatedAgreement.distributor) ||
+          customer
+        ) {
+          return res.status(400).json({
+            message: "Service cycle does not belong to this distributor",
+          });
+        }
+      }
+    }
+
+    // VALIDATE AND INHERIT ONLY THE SELECTED PARTY'S SERVICE ASSIGNMENT.
+    if (customer) {
+      const cycleAssignment = validatedServiceCycle?.customerService
+        ? String(validatedServiceCycle.customerService)
+        : null;
+      const quotationAssignment = validatedQuotation?.customerService
+        ? String(validatedQuotation.customerService)
+        : null;
+
+      if (
+        cycleAssignment &&
+        quotationAssignment &&
+        cycleAssignment !== quotationAssignment
+      ) {
+        return res.status(400).json({
+          message: "Quotation customer service conflicts with its service cycle",
+        });
+      }
+
+      if (
+        customerService &&
+        cycleAssignment &&
+        String(customerService) !== cycleAssignment
+      ) {
+        return res.status(400).json({
+          message: "Customer service assignment does not match this cycle",
+        });
+      }
+
+      if (
+        customerService &&
+        quotationAssignment &&
+        String(customerService) !== quotationAssignment
+      ) {
+        return res.status(400).json({
+          message: "Customer service assignment does not match the quotation",
+        });
+      }
+
+      customerService =
+        customerService || cycleAssignment || quotationAssignment || null;
+
+      if (customerService) {
+        if (!mongoose.isValidObjectId(customerService)) {
+          return res.status(400).json({
+            message: "Invalid customer service ID",
+          });
+        }
+
+        const assignment = await CustomerService.findById(customerService)
+          .select("customer service");
+
+        if (!assignment) {
+          return res.status(404).json({
+            message: "Customer service assignment not found",
+          });
+        }
+
+        if (
+          validatedAgreement &&
+          String(assignment.service) !== String(validatedAgreement.service)
+        ) {
+          return res.status(400).json({
+            message: "Customer service assignment does not match the service agreement",
+          });
+        }
+
+        if (String(assignment.customer) !== String(customer)) {
+          return res.status(400).json({
+            message: "Customer service does not belong to this customer",
+          });
+        }
+      }
+    } else {
+      const cycleAssignment = validatedServiceCycle?.distributorService
+        ? String(validatedServiceCycle.distributorService)
+        : null;
+      const quotationAssignment = validatedQuotation?.distributorService
+        ? String(validatedQuotation.distributorService)
+        : null;
+
+      if (
+        cycleAssignment &&
+        quotationAssignment &&
+        cycleAssignment !== quotationAssignment
+      ) {
+        return res.status(400).json({
+          message: "Quotation distributor service conflicts with its service cycle",
+        });
+      }
+
+      if (
+        distributorService &&
+        cycleAssignment &&
+        String(distributorService) !== cycleAssignment
+      ) {
+        return res.status(400).json({
+          message: "Distributor service assignment does not match this cycle",
+        });
+      }
+
+      if (
+        distributorService &&
+        quotationAssignment &&
+        String(distributorService) !== quotationAssignment
+      ) {
+        return res.status(400).json({
+          message: "Distributor service assignment does not match the quotation",
+        });
+      }
+
+      distributorService =
+        distributorService || cycleAssignment || quotationAssignment || null;
+
+      if (distributorService) {
+        if (!mongoose.isValidObjectId(distributorService)) {
+          return res.status(400).json({
+            message: "Invalid distributor service ID",
+          });
+        }
+
+        const assignment = await DistributorService.findById(distributorService)
+          .select("distributor service");
+
+        if (!assignment) {
+          return res.status(404).json({
+            message: "Distributor service assignment not found",
+          });
+        }
+
+        if (
+          validatedAgreement &&
+          String(assignment.service) !== String(validatedAgreement.service)
+        ) {
+          return res.status(400).json({
+            message: "Distributor service assignment does not match the service agreement",
+          });
+        }
+
+        if (String(assignment.distributor) !== String(distributor)) {
+          return res.status(400).json({
+            message: "Distributor service does not belong to this distributor",
+          });
+        }
+      }
+    }
     // BASIC VALIDATION
     if (!poNumber || !poNumber.trim()) {
       return res.status(400).json({
@@ -79,6 +353,9 @@ const createPurchaseOrder = async (req, res) => {
 
       distributor: distributor || null,
       distributorService: distributorService || null,
+
+      serviceCycle: validatedServiceCycle ? validatedServiceCycle._id : null,
+      quotation: validatedQuotation ? validatedQuotation._id : null,
 
       poNumber,
       poDate,
@@ -366,9 +643,11 @@ const updatePurchaseOrder = async (req, res) => {
       });
     }
 
-    const {
+    let {
       customerService,
       distributorService,
+      serviceCycle,
+      quotation,
       poNumber,
       poDate,
       poIssuedTo,
@@ -378,19 +657,253 @@ const updatePurchaseOrder = async (req, res) => {
       notes,
     } = req.body;
 
-    // SERVICE LINK
-    if (purchaseOrder.customer) {
-      if (customerService !== undefined) {
-        purchaseOrder.customerService =
-          customerService || null;
+    // VALIDATE SERVICE LINKS BEFORE MUTATING THE PURCHASE ORDER.
+    const partyId = purchaseOrder.customer || purchaseOrder.distributor;
+    const isCustomerPO = Boolean(purchaseOrder.customer);
+    const isDistributorPO = Boolean(purchaseOrder.distributor);
+
+    if (isCustomerPO === isDistributorPO) {
+      return res.status(400).json({
+        message: "Purchase order must belong to exactly one party",
+      });
+    }
+
+    if (isCustomerPO && distributorService !== undefined && distributorService) {
+      return res.status(400).json({
+        message: "Customer purchase orders cannot use distributor service assignments",
+      });
+    }
+
+    if (isDistributorPO && customerService !== undefined && customerService) {
+      return res.status(400).json({
+        message: "Distributor purchase orders cannot use customer service assignments",
+      });
+    }
+
+    const effectiveQuotationId =
+      quotation === undefined
+        ? (purchaseOrder.quotation ? String(purchaseOrder.quotation) : null)
+        : (quotation ? String(quotation) : null);
+
+    let effectiveCycleId =
+      serviceCycle === undefined
+        ? (purchaseOrder.serviceCycle ? String(purchaseOrder.serviceCycle) : null)
+        : (serviceCycle ? String(serviceCycle) : null);
+
+    let effectiveAssignmentId = isCustomerPO
+      ? (
+          customerService === undefined
+            ? (purchaseOrder.customerService ? String(purchaseOrder.customerService) : null)
+            : (customerService ? String(customerService) : null)
+        )
+      : (
+          distributorService === undefined
+            ? (purchaseOrder.distributorService ? String(purchaseOrder.distributorService) : null)
+            : (distributorService ? String(distributorService) : null)
+        );
+
+    const assignmentWasExplicit = isCustomerPO
+      ? customerService !== undefined
+      : distributorService !== undefined;
+
+    const relationshipChanged =
+      serviceCycle !== undefined || quotation !== undefined;
+
+    let validatedQuotation = null;
+    let validatedServiceCycle = null;
+    let validatedAgreement = null;
+
+    if (effectiveQuotationId) {
+      if (!mongoose.isValidObjectId(effectiveQuotationId)) {
+        return res.status(400).json({ message: "Invalid quotation ID" });
+      }
+
+      validatedQuotation = await Quotation.findById(effectiveQuotationId);
+
+      if (!validatedQuotation) {
+        return res.status(404).json({ message: "Quotation not found" });
+      }
+
+      if (
+        String(validatedQuotation.customer || "") !== String(purchaseOrder.customer || "") ||
+        String(validatedQuotation.distributor || "") !== String(purchaseOrder.distributor || "")
+      ) {
+        return res.status(400).json({
+          message: "Quotation does not belong to this purchase order's party",
+        });
       }
     }
 
-    if (purchaseOrder.distributor) {
-      if (distributorService !== undefined) {
-        purchaseOrder.distributorService =
-          distributorService || null;
+    // If the quotation was explicitly changed and the cycle was omitted,
+    // inherit the quotation's service cycle before validating it.
+    if (serviceCycle === undefined && quotation !== undefined) {
+      effectiveCycleId = validatedQuotation?.serviceCycle
+        ? String(validatedQuotation.serviceCycle)
+        : null;
+    }
+
+    if (effectiveCycleId) {
+      if (!mongoose.isValidObjectId(effectiveCycleId)) {
+        return res.status(400).json({ message: "Invalid service cycle ID" });
       }
+
+      validatedServiceCycle = await ServiceCycle.findById(effectiveCycleId);
+
+      if (!validatedServiceCycle) {
+        return res.status(404).json({ message: "Service cycle not found" });
+      }
+
+      validatedAgreement = await ServiceAgreement.findById(
+        validatedServiceCycle.agreement
+      );
+
+      if (!validatedAgreement) {
+        return res.status(404).json({ message: "Service agreement not found" });
+      }
+
+      const hasCustomerAgreement = Boolean(validatedAgreement.customer);
+      const hasDistributorAgreement = Boolean(validatedAgreement.distributor);
+
+      if (hasCustomerAgreement === hasDistributorAgreement) {
+        return res.status(400).json({
+          message: "Service agreement must belong to exactly one party",
+        });
+      }
+
+      if (
+        (isCustomerPO &&
+          (!hasCustomerAgreement ||
+            String(validatedAgreement.customer) !== String(partyId))) ||
+        (isDistributorPO &&
+          (!hasDistributorAgreement ||
+            String(validatedAgreement.distributor) !== String(partyId)))
+      ) {
+        return res.status(400).json({
+          message: "Service cycle does not belong to this purchase order's party",
+        });
+      }
+    }
+
+    if (
+      validatedQuotation?.serviceCycle &&
+      String(validatedQuotation.serviceCycle) !== String(effectiveCycleId || "")
+    ) {
+      return res.status(400).json({
+        message: "Quotation belongs to a different service cycle",
+      });
+    }
+
+    const cycleAssignmentId = isCustomerPO
+      ? (validatedServiceCycle?.customerService
+          ? String(validatedServiceCycle.customerService)
+          : null)
+      : (validatedServiceCycle?.distributorService
+          ? String(validatedServiceCycle.distributorService)
+          : null);
+
+    const quotationAssignmentId = isCustomerPO
+      ? (validatedQuotation?.customerService
+          ? String(validatedQuotation.customerService)
+          : null)
+      : (validatedQuotation?.distributorService
+          ? String(validatedQuotation.distributorService)
+          : null);
+
+    if (
+      cycleAssignmentId &&
+      quotationAssignmentId &&
+      cycleAssignmentId !== quotationAssignmentId
+    ) {
+      return res.status(400).json({
+        message: "Quotation service assignment conflicts with its service cycle",
+      });
+    }
+
+    if (
+      assignmentWasExplicit &&
+      !effectiveAssignmentId &&
+      (cycleAssignmentId || quotationAssignmentId)
+    ) {
+      return res.status(400).json({
+        message: "Cannot clear a service assignment required by the selected quotation or cycle",
+      });
+    }
+
+    if (!assignmentWasExplicit && relationshipChanged) {
+      effectiveAssignmentId =
+        cycleAssignmentId ||
+        quotationAssignmentId ||
+        (quotation === undefined ? effectiveAssignmentId : null);
+    }
+
+    if (
+      effectiveAssignmentId &&
+      ((cycleAssignmentId && effectiveAssignmentId !== cycleAssignmentId) ||
+        (quotationAssignmentId && effectiveAssignmentId !== quotationAssignmentId))
+    ) {
+      return res.status(400).json({
+        message: "Service assignment conflicts with the selected quotation or cycle",
+      });
+    }
+
+    if (effectiveAssignmentId) {
+      if (!mongoose.isValidObjectId(effectiveAssignmentId)) {
+        return res.status(400).json({
+          message: isCustomerPO
+            ? "Invalid customer service ID"
+            : "Invalid distributor service ID",
+        });
+      }
+
+      const assignment = isCustomerPO
+        ? await CustomerService.findById(effectiveAssignmentId).select("customer service")
+        : await DistributorService.findById(effectiveAssignmentId).select("distributor service");
+
+      if (!assignment) {
+        return res.status(404).json({
+          message: "Service assignment not found",
+        });
+      }
+
+      const assignmentPartyId = isCustomerPO
+        ? assignment.customer
+        : assignment.distributor;
+
+      if (String(assignmentPartyId) !== String(partyId)) {
+        return res.status(400).json({
+          message: "Service assignment does not belong to this purchase order's party",
+        });
+      }
+
+      if (
+        validatedAgreement &&
+        String(assignment.service) !== String(validatedAgreement.service)
+      ) {
+        return res.status(400).json({
+          message: "Service assignment does not match the service agreement",
+        });
+      }
+    }
+
+    // All relationship checks passed. Now apply the validated links.
+    if (isCustomerPO && (customerService !== undefined || relationshipChanged)) {
+      purchaseOrder.customerService = effectiveAssignmentId || null;
+    }
+
+    if (isDistributorPO && (distributorService !== undefined || relationshipChanged)) {
+      purchaseOrder.distributorService = effectiveAssignmentId || null;
+    }
+
+    if (serviceCycle !== undefined || quotation !== undefined) {
+      purchaseOrder.serviceCycle = validatedServiceCycle
+        ? validatedServiceCycle._id
+        : null;
+    }
+
+    if (quotation !== undefined) {
+      purchaseOrder.quotation = validatedQuotation
+        ? validatedQuotation._id
+        : null;
     }
 
     // BASIC FIELDS
@@ -491,6 +1004,18 @@ const deletePurchaseOrder = async (req, res) => {
     if (purchaseOrder.tallyLinkedAutomatically === true) {
       return res.status(409).json({
         message: "Tally-linked purchase orders are read-only. Update them in TallyPrime.",
+      });
+    }
+
+    // Prevent deletion when invoices reference this purchase order.
+    const linkedInvoices = await Invoice.exists({
+      purchaseOrder: purchaseOrder._id,
+    });
+
+    if (linkedInvoices) {
+      return res.status(409).json({
+        message:
+          "This purchase order cannot be deleted because invoices are linked to it.",
       });
     }
 

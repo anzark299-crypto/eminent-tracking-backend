@@ -25,6 +25,7 @@ const createInvoice = async (req, res) => {
       distributor,
       distributorService,
       purchaseOrder,
+      serviceCycle,
 
       invoiceNumber,
       invoiceDate,
@@ -38,6 +39,7 @@ const createInvoice = async (req, res) => {
       installmentNumber,
       totalInstallments,
       invoiceGroupId,
+
 
       notes,
     } = req.body;
@@ -206,6 +208,22 @@ const createInvoice = async (req, res) => {
 
       inheritedServiceCycle = linkedPurchaseOrder.serviceCycle || null;
     }
+
+    // EXPLICIT CYCLE + PURCHASE ORDER CYCLE RECONCILIATION
+    const explicitServiceCycle = serviceCycle || null;
+
+    if (
+      explicitServiceCycle &&
+      inheritedServiceCycle &&
+      String(explicitServiceCycle) !== String(inheritedServiceCycle)
+    ) {
+      return res.status(400).json({
+        message: "Selected service cycle does not match the purchase order cycle",
+      });
+    }
+
+    inheritedServiceCycle =
+      explicitServiceCycle || inheritedServiceCycle || null;
 
     // VALIDATE INHERITED SERVICE ASSIGNMENT AND CYCLE
     if (finalCustomerService) {
@@ -531,6 +549,18 @@ const createInvoice = async (req, res) => {
 
       totalInstallments:
         finalTotalInstallments,
+
+
+      ...(inheritedServiceCycle
+        ? {
+            paymentStatusSource: "manual",
+            manualPaymentStatus:
+              finalStatus === "paid" ? "paid" : "unpaid",
+            manualPaymentDate:
+              finalStatus === "paid" ? finalPaymentDate : null,
+            manualPaymentUpdatedAt: new Date(),
+          }
+        : {}),
 
       notes,
     });
@@ -940,6 +970,7 @@ const updateInvoice = async (req, res) => {
       customerService,
       distributorService,
       purchaseOrder,
+      serviceCycle,
 
       invoiceNumber,
       invoiceDate,
@@ -953,6 +984,7 @@ const updateInvoice = async (req, res) => {
       installmentNumber,
       totalInstallments,
       invoiceGroupId,
+
 
       notes,
     } = req.body;
@@ -1068,7 +1100,11 @@ const updateInvoice = async (req, res) => {
       }
     } else if (
       invoice.purchaseOrder &&
-      (customerService !== undefined || distributorService !== undefined)
+      (
+        customerService !== undefined ||
+        distributorService !== undefined ||
+        serviceCycle !== undefined
+      )
     ) {
       linkedPurchaseOrder =
         await PurchaseOrder.findById(invoice.purchaseOrder);
@@ -1093,6 +1129,33 @@ const updateInvoice = async (req, res) => {
         distributorService === null || distributorService === ""
           ? null
           : distributorService;
+    }
+
+    // APPLY EXPLICIT SERVICE CYCLE SELECTION
+    if (serviceCycle !== undefined) {
+      const explicitServiceCycle =
+        serviceCycle === null || serviceCycle === ""
+          ? null
+          : serviceCycle;
+
+      const inheritedServiceCycle = linkedPurchaseOrder
+        ? linkedPurchaseOrder.serviceCycle || null
+        : nextPurchaseOrder
+          ? nextServiceCycle
+          : null;
+
+      if (
+        explicitServiceCycle &&
+        inheritedServiceCycle &&
+        !sameId(explicitServiceCycle, inheritedServiceCycle)
+      ) {
+        return res.status(400).json({
+          message: "Selected service cycle does not match the purchase order cycle",
+        });
+      }
+
+      nextServiceCycle =
+        explicitServiceCycle || inheritedServiceCycle || null;
     }
 
     // INHERIT AND VALIDATE PURCHASE ORDER SERVICE ASSIGNMENTS
@@ -1433,6 +1496,15 @@ const updateInvoice = async (req, res) => {
         invoice.paymentDate =
           parsedPaymentDate;
       }
+    }
+
+    if (status !== undefined && invoice.serviceCycle) {
+      invoice.paymentStatusSource = "manual";
+      invoice.manualPaymentStatus =
+        status === "paid" ? "paid" : "unpaid";
+      invoice.manualPaymentDate =
+        status === "paid" ? invoice.paymentDate : null;
+      invoice.manualPaymentUpdatedAt = new Date();
     }
 
     // DUE DATE
@@ -1821,4 +1893,3 @@ module.exports = {
   deleteInvoice,
   uploadInvoicePdf,
 };
-

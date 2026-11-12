@@ -1,4 +1,4 @@
-﻿const TallyTransaction = require("../models/tallyTransaction");
+const TallyTransaction = require("../models/tallyTransaction");
 const Payment = require("../models/payment");
 const Invoice = require("../models/invoice");
 const PurchaseOrder = require("../models/purchaseOrder");
@@ -261,24 +261,13 @@ function positiveNumber(value) {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-function itemName(item, transaction = null) {
+function itemName(item) {
   const actualName = clean(item?.stockItemName || item?.description);
-
-  if (actualName) return actualName;
-
-  if (transaction?.voucherNumber) {
-    return `Tally Purchase Voucher ${clean(transaction.voucherNumber)}`;
-  }
-
-  if (transaction?.tallyVoucherIdentity) {
-    return `Tally Purchase Voucher ${clean(transaction.tallyVoucherIdentity)}`;
-  }
-
-  return null;
+  return actualName || null;
 }
 
 async function ensureTallyService(transaction, item) {
-  const name = itemName(item, transaction);
+  const name = itemName(item);
   if (!name || !transaction.tallyVoucherIdentity) return null;
 
   let service = await Service.findOne({

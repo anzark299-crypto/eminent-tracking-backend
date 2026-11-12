@@ -10,6 +10,7 @@ const createService = async (req, res) => {
       description,
       oem,
       category,
+      serviceType,
       unit,
     } = req.body;
 
@@ -24,6 +25,7 @@ const createService = async (req, res) => {
       description,
       oem,
       category,
+      serviceType,
       unit,
     });
 
@@ -102,6 +104,7 @@ const updateService = async (req, res) => {
       description,
       oem,
       category,
+      serviceType,
       unit,
       status,
     } = req.body;
@@ -110,6 +113,7 @@ const updateService = async (req, res) => {
     service.description = description ?? service.description;
     service.oem = oem ?? service.oem;
     service.category = category ?? service.category;
+    service.serviceType = serviceType ?? service.serviceType;
     service.unit = unit ?? service.unit;
     service.status = status ?? service.status;
 

@@ -6,6 +6,28 @@ const Service = require("../models/service");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
 const Activity = require("../models/activity");
+
+const resolveCounterpartCustomerServiceId = async (distributorService) => {
+  const customerId =
+    distributorService.linkedCustomer?._id ||
+    distributorService.linkedCustomer;
+  const distributorId =
+    distributorService.distributor?._id ||
+    distributorService.distributor;
+  const serviceId =
+    distributorService.service?._id ||
+    distributorService.service;
+
+  if (!customerId || !distributorId || !serviceId) return null;
+
+  const matches = await CustomerService.find({
+    customer: customerId,
+    linkedDistributor: distributorId,
+    service: serviceId,
+  }).select("_id").limit(2).lean();
+
+  return matches.length === 1 ? matches[0]._id : null;
+};
 // ============================================================
 // PAYMENT SCHEDULE HELPERS
 // ============================================================
@@ -658,11 +680,12 @@ const getDistributorServices = async (
   res
 ) => {
   try {
+    const distributorFilter = req.params.distributorId
+      ? { distributor: req.params.distributorId }
+      : {};
+
     const distributorServices =
-      await DistributorService.find({
-        distributor:
-          req.params.distributorId,
-      })
+      await DistributorService.find(distributorFilter)
         .populate("service")
         .populate("linkedCustomer")
         .populate(
@@ -673,9 +696,9 @@ const getDistributorServices = async (
           createdAt: -1,
         });
 
-    const result =
+    const result = await Promise.all(
       distributorServices.map(
-        (distributorService) => {
+        async (distributorService) => {
           const serviceObject =
             distributorService.toObject();
 
@@ -688,9 +711,15 @@ const getDistributorServices = async (
                 : []
             );
 
+          serviceObject.counterpartServiceId =
+            await resolveCounterpartCustomerServiceId(
+              distributorService
+            );
+
           return serviceObject;
         }
-      );
+      )
+    );
 
     return res.status(200).json({
       distributorServices: result,
@@ -752,6 +781,11 @@ const getDistributorServiceById =
 
       serviceObject.installments =
         refreshedInstallments;
+
+      serviceObject.counterpartServiceId =
+        await resolveCounterpartCustomerServiceId(
+          distributorService
+        );
 
       return res.status(200).json({
         distributorService:

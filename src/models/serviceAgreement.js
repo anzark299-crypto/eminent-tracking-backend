@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const serviceAgreementSchema = new mongoose.Schema(
   {
@@ -18,6 +18,12 @@ const serviceAgreementSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Service",
       required: true,
+      index: true,
+    },
+    counterpartAgreement: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceAgreement",
+      default: null,
       index: true,
     },
     status: {

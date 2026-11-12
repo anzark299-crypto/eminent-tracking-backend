@@ -112,21 +112,24 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectDatabase();
 
-    // Check service expiry immediately when server starts
-    await checkServiceExpiryNotifications();
+    // Notifications are disabled by default.
+    // Set ENABLE_EXPIRY_NOTIFICATIONS=true to enable them.
+    if (process.env.ENABLE_EXPIRY_NOTIFICATIONS === "true") {
+      await checkServiceExpiryNotifications();
 
-    // Check service expiry every day at 9:00 AM IST
-    cron.schedule(
-      "0 9 * * *",
-      async () => {
-        console.log("Running scheduled service expiry check...");
-
-        await checkServiceExpiryNotifications();
-      },
-      {
-        timezone: "Asia/Kolkata",
-      }
-    );
+      cron.schedule(
+        "0 9 * * *",
+        async () => {
+          console.log("Running scheduled service expiry check...");
+          await checkServiceExpiryNotifications();
+        },
+        {
+          timezone: "Asia/Kolkata",
+        }
+      );
+    } else {
+      console.log("Service expiry notifications are disabled.");
+    }
 
     // Start server
     app.listen(PORT, () => {

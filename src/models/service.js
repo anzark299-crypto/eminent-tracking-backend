@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+﻿const mongoose = require("mongoose");
 
 const serviceSchema = new mongoose.Schema(
   {
@@ -15,6 +15,12 @@ const serviceSchema = new mongoose.Schema(
 
     oem: {
       type: String,
+      trim: true,
+    },
+
+    serviceType: {
+      type: String,
+      enum: ["hardware", "software"],
       trim: true,
     },
 

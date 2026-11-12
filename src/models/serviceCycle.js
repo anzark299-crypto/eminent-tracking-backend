@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 
 const serviceCycleSchema = new mongoose.Schema(
   {
@@ -8,12 +8,23 @@ const serviceCycleSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    counterpartCycle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceCycle",
+      default: null,
+      index: true,
+    },
     cycleNumber: {
       type: Number,
       required: true,
       min: 1,
     },
     previousCycle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ServiceCycle",
+      default: null,
+    },
+    previousCounterpartCycle: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ServiceCycle",
       default: null,

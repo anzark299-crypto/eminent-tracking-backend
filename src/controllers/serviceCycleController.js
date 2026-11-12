@@ -173,7 +173,8 @@ const validateCycleDates = (startDate, endDate) => {
 
 // POST /api/service-cycles/agreements
 const createAgreementWithInitialCycle = async (req, res) => {
-  let agreement;
+  const createdAgreementIds = [];
+  const createdCycleIds = [];
 
   try {
     const {
@@ -193,6 +194,17 @@ const createAgreementWithInitialCycle = async (req, res) => {
       customerService,
       distributorService,
       cycleNotes,
+      counterpartTitle,
+      counterpartNotes,
+      counterpartStartDate,
+      counterpartEndDate,
+      counterpartCycleNotes,
+      counterpartCustomerAmount,
+      counterpartDistributorAmount,
+      counterpartCurrency,
+      counterpartServiceVersion,
+      counterpartPackageName,
+      counterpartSpecifications,
     } = req.body;
 
     if (Boolean(customer) === Boolean(distributor)) {
@@ -224,11 +236,12 @@ const createAgreementWithInitialCycle = async (req, res) => {
     }
 
     const dates = validateCycleDates(startDate, endDate);
+
     if (dates.error) {
       return res.status(400).json({ message: dates.error });
     }
 
-    agreement = new ServiceAgreement({
+    const agreement = new ServiceAgreement({
       customer: customer || null,
       distributor: distributor || null,
       service,
@@ -236,8 +249,6 @@ const createAgreementWithInitialCycle = async (req, res) => {
       notes,
       status: "active",
     });
-
-    await agreement.validate();
 
     const assignmentError = await validatePartyAssignment({
       agreement,
@@ -247,6 +258,74 @@ const createAgreementWithInitialCycle = async (req, res) => {
 
     if (assignmentError) {
       return res.status(400).json({ message: assignmentError });
+    }
+
+    const paired = Boolean(customerService && distributorService);
+
+    let counterpartAgreement = null;
+    let counterpartCycle = null;
+    let counterpartDates = null;
+    let counterpartCustomer = null;
+    let counterpartDistributor = null;
+
+    if (paired) {
+      counterpartDates = validateCycleDates(
+        counterpartStartDate,
+        counterpartEndDate
+      );
+
+      if (counterpartDates.error) {
+        return res.status(400).json({
+          message: `Counterpart cycle: ${counterpartDates.error}`,
+        });
+      }
+
+      const [customerAssignment, distributorAssignment] =
+        await Promise.all([
+          CustomerService.findById(customerService),
+          DistributorService.findById(distributorService),
+        ]);
+
+      if (!customerAssignment || !distributorAssignment) {
+        return res.status(404).json({
+          message: "One of the linked service assignments was not found.",
+        });
+      }
+
+      counterpartCustomer = customer
+        ? null
+        : customerAssignment.customer;
+
+      counterpartDistributor = distributor
+        ? null
+        : distributorAssignment.distributor;
+
+      const counterpartReferenceError =
+        await validateAgreementReferences({
+          customer: counterpartCustomer,
+          distributor: counterpartDistributor,
+          service,
+        });
+
+      if (counterpartReferenceError) {
+        return res.status(404).json({
+          message: counterpartReferenceError,
+        });
+      }
+
+      counterpartAgreement = new ServiceAgreement({
+        customer: counterpartCustomer || null,
+        distributor: counterpartDistributor || null,
+        service,
+        title: counterpartTitle ?? title,
+        notes: counterpartNotes ?? "",
+        status: "active",
+      });
+
+      agreement.counterpartAgreement = counterpartAgreement._id;
+      counterpartAgreement.counterpartAgreement = agreement._id;
+
+      await counterpartAgreement.validate();
     }
 
     const cycle = new ServiceCycle({
@@ -262,28 +341,88 @@ const createAgreementWithInitialCycle = async (req, res) => {
       packageName: packageName || "",
       specifications: specifications || {},
       status: "draft",
-      customerService: customerService || null,
-      distributorService: distributorService || null,
+      customerService: customer ? (customerService || null) : null,
+      distributorService: distributor ? (distributorService || null) : null,
       notes: cycleNotes || "",
     });
 
+    if (paired) {
+      counterpartCycle = new ServiceCycle({
+        agreement: counterpartAgreement._id,
+        cycleNumber: 1,
+        cycleType: "initial",
+        startDate: counterpartDates.start,
+        endDate: counterpartDates.end,
+        customerAmount: counterpartCustomerAmount ?? null,
+        distributorAmount: counterpartDistributorAmount ?? null,
+        currency: counterpartCurrency || "INR",
+        serviceVersion: counterpartServiceVersion || "",
+        packageName: counterpartPackageName || "",
+        specifications: counterpartSpecifications || {},
+        status: "draft",
+        customerService: counterpartCustomer ? (customerService || null) : null,
+        distributorService: counterpartDistributor ? (distributorService || null) : null,
+        notes: counterpartCycleNotes || "",
+      });
+
+      cycle.counterpartCycle = counterpartCycle._id;
+      counterpartCycle.counterpartCycle = cycle._id;
+    }
+
+    await agreement.validate();
     await cycle.validate();
 
-    await agreement.save();
+    if (counterpartCycle) {
+      await counterpartCycle.validate();
+    }
 
-    try {
-      await cycle.save();
-    } catch (cycleError) {
-      await ServiceAgreement.deleteOne({ _id: agreement._id });
-      throw cycleError;
+    await agreement.save();
+    createdAgreementIds.push(agreement._id);
+
+    if (counterpartAgreement) {
+      await counterpartAgreement.save();
+      createdAgreementIds.push(counterpartAgreement._id);
+    }
+
+    await cycle.save();
+    createdCycleIds.push(cycle._id);
+
+    if (counterpartCycle) {
+      await counterpartCycle.save();
+      createdCycleIds.push(counterpartCycle._id);
     }
 
     return res.status(201).json({
-      message: "Service agreement and initial cycle created.",
+      message: paired
+        ? "Paired service agreements and initial cycles created."
+        : "Service agreement and initial cycle created.",
       agreement,
       cycle,
+      ...(paired
+        ? {
+            paired: true,
+            counterpartAgreement,
+            counterpartCycle,
+          }
+        : {}),
     });
   } catch (error) {
+    try {
+      if (createdCycleIds.length) {
+        await ServiceCycle.deleteMany({
+          _id: { $in: createdCycleIds },
+        });
+      }
+
+      if (createdAgreementIds.length) {
+        await ServiceAgreement.deleteMany({
+          _id: { $in: createdAgreementIds },
+        });
+      }
+    } catch (cleanupError) {
+      console.error("Create agreement/cycle cleanup error:", cleanupError);
+    }
+
     console.error("Create agreement/cycle error:", error);
 
     return res.status(500).json({
@@ -294,7 +433,6 @@ const createAgreementWithInitialCycle = async (req, res) => {
     });
   }
 };
-
 // GET /api/service-cycles/agreements/:agreementId
 const getServiceCyclesByAssignment = async (req, res) => {
   try {
@@ -331,6 +469,7 @@ const getServiceCyclesByAssignment = async (req, res) => {
     })
       .sort({ agreement: 1, cycleNumber: 1 })
       .populate("previousCycle")
+      .populate("counterpartCycle")
       .populate("customerService")
       .populate("distributorService");
 
@@ -349,13 +488,23 @@ const getServiceCyclesByAssignment = async (req, res) => {
 
         const cycles = await Promise.all(
           matchingCycles.map(async (cycle) => {
+            const documentCycleIds = [cycle._id];
+            const counterpartCycle = cycle.counterpartCycle;
+
+            if (
+              counterpartCycle &&
+              sameId(counterpartCycle.counterpartCycle, cycle._id)
+            ) {
+              documentCycleIds.push(counterpartCycle._id);
+            }
+
             const [quotations, purchaseOrders, invoices] = await Promise.all([
-              Quotation.find({ serviceCycle: cycle._id })
+              Quotation.find({ serviceCycle: { $in: documentCycleIds } })
                 .sort({ quotationDate: 1, createdAt: 1 }),
-              PurchaseOrder.find({ serviceCycle: cycle._id })
+              PurchaseOrder.find({ serviceCycle: { $in: documentCycleIds } })
                 .populate("quotation", "quotationNumber quotationDate amount status")
                 .sort({ poDate: 1, createdAt: 1 }),
-              Invoice.find({ serviceCycle: cycle._id })
+              Invoice.find({ serviceCycle: { $in: documentCycleIds } })
                 .populate({
                   path: "purchaseOrder",
                   select: "poNumber poDate amount quotation",
@@ -424,20 +573,31 @@ const getAgreementCycles = async (req, res) => {
     const cycleRecords = await ServiceCycle.find({ agreement: agreement._id })
       .sort({ cycleNumber: 1 })
       .populate("previousCycle")
+      .populate("counterpartCycle")
       .populate("customerService")
       .populate("distributorService");
 
     const cycles = await Promise.all(
       cycleRecords.map(async (cycle) => {
-        const [quotations, purchaseOrders, invoices] = await Promise.all([
-          Quotation.find({ serviceCycle: cycle._id })
+        const documentCycleIds = [cycle._id];
+            const counterpartCycle = cycle.counterpartCycle;
+
+            if (
+              counterpartCycle &&
+              sameId(counterpartCycle.counterpartCycle, cycle._id)
+            ) {
+              documentCycleIds.push(counterpartCycle._id);
+            }
+
+            const [quotations, purchaseOrders, invoices] = await Promise.all([
+          Quotation.find({ serviceCycle: { $in: documentCycleIds } })
             .sort({ quotationDate: 1, createdAt: 1 }),
 
-          PurchaseOrder.find({ serviceCycle: cycle._id })
+          PurchaseOrder.find({ serviceCycle: { $in: documentCycleIds } })
             .populate("quotation", "quotationNumber quotationDate amount status")
             .sort({ poDate: 1, createdAt: 1 }),
 
-          Invoice.find({ serviceCycle: cycle._id })
+          Invoice.find({ serviceCycle: { $in: documentCycleIds } })
             .populate({
               path: "purchaseOrder",
               select: "poNumber poDate amount quotation",
@@ -487,6 +647,8 @@ const getAgreementCycles = async (req, res) => {
 
 // POST /api/service-cycles/:cycleId/renew
 const renewServiceCycle = async (req, res) => {
+  let createdCycleIds = [];
+
   try {
     const { cycleId } = req.params;
 
@@ -527,12 +689,16 @@ const renewServiceCycle = async (req, res) => {
       return res.status(400).json({ message: dates.error });
     }
 
+    const customerServiceId =
+      req.body.customerService ?? previousCycle.customerService;
+
+    const distributorServiceId =
+      req.body.distributorService ?? previousCycle.distributorService;
+
     const assignmentError = await validatePartyAssignment({
       agreement,
-      customerServiceId:
-        req.body.customerService ?? previousCycle.customerService,
-      distributorServiceId:
-        req.body.distributorService ?? previousCycle.distributorService,
+      customerServiceId,
+      distributorServiceId,
     });
 
     if (assignmentError) {
@@ -547,6 +713,114 @@ const renewServiceCycle = async (req, res) => {
       return res.status(409).json({
         message: "Only the latest cycle can be renewed.",
       });
+    }
+
+    const hasCounterpartCycle = Boolean(previousCycle.counterpartCycle);
+    const hasCounterpartAgreement = Boolean(agreement.counterpartAgreement);
+
+    if (hasCounterpartCycle !== hasCounterpartAgreement) {
+      return res.status(409).json({
+        message: "The paired agreement or cycle relationship is incomplete.",
+      });
+    }
+
+    const paired = hasCounterpartCycle && hasCounterpartAgreement;
+
+    let counterpartPreviousCycle = null;
+    let counterpartAgreement = null;
+    let counterpartDates = null;
+    let counterpartCustomer = null;
+    let counterpartDistributor = null;
+    let counterpartCycle = null;
+
+    if (paired) {
+      if (!customerServiceId || !distributorServiceId) {
+        return res.status(400).json({
+          message: "Both linked service assignment IDs are required.",
+        });
+      }
+
+      counterpartPreviousCycle = await ServiceCycle.findById(
+        previousCycle.counterpartCycle
+      );
+
+      counterpartAgreement = await ServiceAgreement.findById(
+        agreement.counterpartAgreement
+      );
+
+      if (!counterpartPreviousCycle || !counterpartAgreement) {
+        return res.status(404).json({
+          message: "The counterpart agreement or previous cycle was not found.",
+        });
+      }
+
+      if (
+        !sameId(
+          counterpartPreviousCycle.counterpartCycle,
+          previousCycle._id
+        ) ||
+        !sameId(counterpartPreviousCycle.agreement, counterpartAgreement._id) ||
+        !sameId(counterpartAgreement.counterpartAgreement, agreement._id)
+      ) {
+        return res.status(409).json({
+          message: "The reciprocal counterpart links do not match.",
+        });
+      }
+
+      const counterpartReferenceError =
+        await validateAgreementReferences({
+          customer: counterpartAgreement.customer,
+          distributor: counterpartAgreement.distributor,
+          service: counterpartAgreement.service,
+        });
+
+      if (counterpartReferenceError) {
+        return res.status(404).json({
+          message: counterpartReferenceError,
+        });
+      }
+
+      if (!sameId(counterpartAgreement.service, agreement.service)) {
+        return res.status(409).json({
+          message: "The paired agreements use different master services.",
+        });
+      }
+
+      const counterpartAssignmentError = await validatePartyAssignment({
+        agreement: counterpartAgreement,
+        customerServiceId,
+        distributorServiceId,
+      });
+
+      if (counterpartAssignmentError) {
+        return res.status(400).json({
+          message: counterpartAssignmentError,
+        });
+      }
+
+      counterpartDates = validateCycleDates(
+        req.body.counterpartStartDate,
+        req.body.counterpartEndDate
+      );
+
+      if (counterpartDates.error) {
+        return res.status(400).json({
+          message: `Counterpart cycle: ${counterpartDates.error}`,
+        });
+      }
+
+      const latestCounterpartCycle = await ServiceCycle.findOne({
+        agreement: counterpartAgreement._id,
+      }).sort({ cycleNumber: -1 });
+
+      if (
+        !latestCounterpartCycle ||
+        !sameId(latestCounterpartCycle._id, counterpartPreviousCycle._id)
+      ) {
+        return res.status(409).json({
+          message: "Only the latest counterpart cycle can be renewed.",
+        });
+      }
     }
 
     const cycle = new ServiceCycle({
@@ -567,21 +841,89 @@ const renewServiceCycle = async (req, res) => {
       specifications:
         req.body.specifications ?? previousCycle.specifications,
       status: "draft",
-      customerService:
-        req.body.customerService ?? previousCycle.customerService,
-      distributorService:
-        req.body.distributorService ?? previousCycle.distributorService,
+      customerService: agreement.customer ? (customerServiceId || null) : null,
+      distributorService: agreement.distributor ? (distributorServiceId || null) : null,
       notes: req.body.cycleNotes ?? "",
     });
 
+    if (paired) {
+      counterpartCycle = new ServiceCycle({
+        agreement: counterpartAgreement._id,
+        cycleNumber: counterpartPreviousCycle.cycleNumber + 1,
+        previousCycle: counterpartPreviousCycle._id,
+        previousCounterpartCycle: previousCycle._id,
+        cycleType: "renewal",
+        startDate: counterpartDates.start,
+        endDate: counterpartDates.end,
+        customerAmount:
+          req.body.counterpartCustomerAmount ??
+          counterpartPreviousCycle.customerAmount,
+        distributorAmount:
+          req.body.counterpartDistributorAmount ??
+          counterpartPreviousCycle.distributorAmount,
+        currency:
+          req.body.counterpartCurrency ??
+          counterpartPreviousCycle.currency,
+        serviceVersion:
+          req.body.counterpartServiceVersion ??
+          counterpartPreviousCycle.serviceVersion,
+        packageName:
+          req.body.counterpartPackageName ??
+          counterpartPreviousCycle.packageName,
+        specifications:
+          req.body.counterpartSpecifications ??
+          counterpartPreviousCycle.specifications,
+        status: "draft",
+        customerService: counterpartAgreement.customer ? customerServiceId : null,
+        distributorService: counterpartAgreement.distributor ? distributorServiceId : null,
+        notes: req.body.counterpartCycleNotes ?? "",
+      });
+
+      cycle.counterpartCycle = counterpartCycle._id;
+      cycle.previousCounterpartCycle = counterpartPreviousCycle._id;
+
+      counterpartCycle.counterpartCycle = cycle._id;
+    }
+
+    await cycle.validate();
+
+    if (counterpartCycle) {
+      await counterpartCycle.validate();
+    }
+
     await cycle.save();
+    createdCycleIds.push(cycle._id);
+
+    if (counterpartCycle) {
+      await counterpartCycle.save();
+      createdCycleIds.push(counterpartCycle._id);
+    }
 
     return res.status(201).json({
-      message: "Renewal cycle created. Previous cycle preserved.",
+      message: paired
+        ? "Paired renewal cycles created. Previous cycles preserved."
+        : "Renewal cycle created. Previous cycle preserved.",
       previousCycle,
       cycle,
+      ...(paired
+        ? {
+            paired: true,
+            counterpartPreviousCycle,
+            counterpartCycle,
+          }
+        : {}),
     });
   } catch (error) {
+    try {
+      if (createdCycleIds.length) {
+        await ServiceCycle.deleteMany({
+          _id: { $in: createdCycleIds },
+        });
+      }
+    } catch (cleanupError) {
+      console.error("Renew cycle cleanup error:", cleanupError);
+    }
+
     console.error("Renew service cycle error:", error);
 
     if (error.code === 11000) {
@@ -595,7 +937,6 @@ const renewServiceCycle = async (req, res) => {
     });
   }
 };
-
 const deleteServiceCycle = async (req, res) => {
   try {
     const { cycleId } = req.params;
@@ -610,19 +951,56 @@ const deleteServiceCycle = async (req, res) => {
       return res.status(404).json({ message: "Service cycle not found." });
     }
 
-    const [quotations, purchaseOrders, invoices, dependentCycles] =
-      await Promise.all([
-        Quotation.exists({ serviceCycle: cycle._id }),
-        PurchaseOrder.exists({ serviceCycle: cycle._id }),
-        Invoice.exists({ serviceCycle: cycle._id }),
-        ServiceCycle.exists({ previousCycle: cycle._id }),
-      ]);
+    const [
+      quotations,
+      purchaseOrders,
+      invoices,
+      dependentCycles,
+      dependentCounterpartCycles,
+    ] = await Promise.all([
+      Quotation.exists({ serviceCycle: cycle._id }),
+      PurchaseOrder.exists({ serviceCycle: cycle._id }),
+      Invoice.exists({ serviceCycle: cycle._id }),
+      ServiceCycle.exists({ previousCycle: cycle._id }),
+      ServiceCycle.exists({ previousCounterpartCycle: cycle._id }),
+    ]);
 
-    if (quotations || purchaseOrders || invoices || dependentCycles) {
+    if (
+      quotations ||
+      purchaseOrders ||
+      invoices ||
+      dependentCycles ||
+      dependentCounterpartCycles
+    ) {
       return res.status(409).json({
         message:
           "This cycle cannot be deleted because it has linked documents or a renewal cycle. Remove or resolve those dependencies first.",
       });
+    }
+
+    // Detach only the reciprocal counterpart cycle.
+    // Keep the counterpart cycle and its documents intact.
+    if (cycle.counterpartCycle) {
+      await ServiceCycle.updateOne(
+        {
+          _id: cycle.counterpartCycle,
+          counterpartCycle: cycle._id,
+        },
+        {
+          $set: { counterpartCycle: null },
+        }
+      );
+
+      // Clear only a previous-counterpart reference to this cycle.
+      await ServiceCycle.updateOne(
+        {
+          _id: cycle.counterpartCycle,
+          previousCounterpartCycle: cycle._id,
+        },
+        {
+          $set: { previousCounterpartCycle: null },
+        }
+      );
     }
 
     // Payments are linked to invoices, so never delete payments here.

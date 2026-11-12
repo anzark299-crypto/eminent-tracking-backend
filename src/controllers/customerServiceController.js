@@ -5,6 +5,27 @@ const Distributor = require("../models/distributor");
 const DistributorService = require("../models/distributorService");
 const Activity = require("../models/activity");
 
+const resolveCounterpartDistributorServiceId = async (customerService) => {
+  const distributorId =
+    customerService.linkedDistributor?._id ||
+    customerService.linkedDistributor;
+  const customerId =
+    customerService.customer?._id || customerService.customer;
+  const serviceId =
+    customerService.service?._id || customerService.service;
+
+  if (!distributorId || !customerId || !serviceId) return null;
+
+  const matches = await DistributorService.find({
+    distributor: distributorId,
+    linkedCustomer: customerId,
+    service: serviceId,
+  }).select("_id").limit(2).lean();
+
+  return matches.length === 1 ? matches[0]._id : null;
+};
+
+
 // ------------------------------------
 // CREATE CUSTOMER SERVICE
 // ------------------------------------
@@ -193,7 +214,11 @@ const getCustomerServices = async (req, res) => {
       .sort({ createdAt: -1 });
 
     res.status(200).json({
-      customerServices,
+      customerServices: await Promise.all(customerServices.map(async (item) => ({
+        ...item.toObject(),
+        counterpartServiceId:
+          await resolveCounterpartDistributorServiceId(item),
+      }))),
     });
   } catch (error) {
     console.error(
@@ -221,7 +246,11 @@ const getCustomerServicesByCustomer = async (req, res) => {
       .sort({ createdAt: -1 });
 
     res.status(200).json({
-      customerServices,
+      customerServices: await Promise.all(customerServices.map(async (item) => ({
+        ...item.toObject(),
+        counterpartServiceId:
+          await resolveCounterpartDistributorServiceId(item),
+      }))),
     });
   } catch (error) {
     console.error(
@@ -254,7 +283,11 @@ const getCustomerServiceById = async (req, res) => {
     }
 
     res.status(200).json({
-      customerService,
+      customerService: {
+        ...customerService.toObject(),
+        counterpartServiceId:
+          await resolveCounterpartDistributorServiceId(customerService),
+      },
     });
   } catch (error) {
     console.error(

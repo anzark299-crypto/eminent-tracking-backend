@@ -1,4 +1,4 @@
-﻿const mongoose = require("mongoose");
+const mongoose = require("mongoose");
 const ServiceAgreement = require("../models/serviceAgreement");
 const ServiceCycle = require("../models/serviceCycle");
 const CustomerService = require("../models/customerService");
@@ -10,6 +10,7 @@ const Quotation = require("../models/quotation");
 const PurchaseOrder = require("../models/purchaseOrder");
 const Invoice = require("../models/invoice");
 const Payment = require("../models/payment");
+const CycleInventory = require("../models/cycleInventory");
 
 const isValidId = (id) => mongoose.Types.ObjectId.isValid(id);
 
@@ -957,12 +958,19 @@ const deleteServiceCycle = async (req, res) => {
       invoices,
       dependentCycles,
       dependentCounterpartCycles,
+      cycleInventory,
     ] = await Promise.all([
       Quotation.exists({ serviceCycle: cycle._id }),
       PurchaseOrder.exists({ serviceCycle: cycle._id }),
       Invoice.exists({ serviceCycle: cycle._id }),
       ServiceCycle.exists({ previousCycle: cycle._id }),
       ServiceCycle.exists({ previousCounterpartCycle: cycle._id }),
+      CycleInventory.exists({
+        $or: [
+          { customerCycle: cycle._id },
+          { distributorCycle: cycle._id },
+        ],
+      }),
     ]);
 
     if (
@@ -970,11 +978,12 @@ const deleteServiceCycle = async (req, res) => {
       purchaseOrders ||
       invoices ||
       dependentCycles ||
-      dependentCounterpartCycles
+      dependentCounterpartCycles ||
+      cycleInventory
     ) {
       return res.status(409).json({
         message:
-          "This cycle cannot be deleted because it has linked documents or a renewal cycle. Remove or resolve those dependencies first.",
+          "This cycle cannot be deleted because it has linked documents or a renewal cycle. Remove or resolve those dependencies first. Cycles with inventory history cannot be deleted.",
       });
     }
 
@@ -1025,7 +1034,3 @@ module.exports = {
   renewServiceCycle,
   deleteServiceCycle,
 };
-
-
-
-

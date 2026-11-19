@@ -48,6 +48,25 @@ const PORT = process.env.PORT || 4000;
 // MIDDLEWARE
 // ==========================
 
+// Allow local Flutter Web and production Vercel origins.
+app.use(cors({
+  origin: (origin, callback) => {
+    const isLocalFlutterWeb =
+      origin &&
+      /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+    const isProductionFlutterWeb =
+      origin === "https://eminent-tracking.vercel.app";
+
+    callback(
+      null,
+      isLocalFlutterWeb || isProductionFlutterWeb ? origin : false
+    );
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
+}));
 // Parse JSON request bodies
 // IMPORTANT: This MUST come before all routes.
 // Allow the hosted password-reset page to call the reset API.

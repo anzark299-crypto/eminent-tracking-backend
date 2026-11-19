@@ -38,25 +38,47 @@ const sendEmailNotification = async (users, subject, message) => {
 };
 
 const sendPasswordResetEmail = async (email, resetLink) => {
-  if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
-    throw new Error("Password-reset email configuration is missing");
+  const apiKey = process.env.RESEND_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("Resend API key is not configured");
   }
 
-  await transporter.sendMail({
-    from: `"Eminent Tracking" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: "Reset your Eminent Tracking password",
-    text: [
-      "We received a request to reset your Eminent Tracking password.",
-      "",
-      "Open this link on your device to choose a new password:",
-      resetLink,
-      "",
-      "This link expires in 15 minutes and can only be used once.",
-      "If you did not request this, you can ignore this email.",
-    ].join("\n"),
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: "Eminent Tracking <onboarding@resend.dev>",
+      to: [email],
+      subject: "Reset your Eminent Tracking password",
+      text: [
+        "We received a request to reset your Eminent Tracking password.",
+        "",
+        "Open this link on your device to choose a new password:",
+        resetLink,
+        "",
+        "This link expires in 15 minutes and can only be used once.",
+        "If you did not request this, you can ignore this email.",
+      ].join("\n"),
+    }),
   });
+
+  const result = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      `Resend email failed (${response.status}): ${
+        result.message || "Unknown provider error"
+      }`
+    );
+  }
+
+  console.log(`Password-reset email accepted by Resend for ${email}.`);
 };
+
 module.exports = {
   sendPasswordResetEmail,
   sendEmailNotification,
